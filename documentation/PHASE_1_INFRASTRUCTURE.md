@@ -1,0 +1,19 @@
+# Phase 1 — Infrastructure & Project Scaffolding
+
+**Goal:** Stand up the entire development environment, Docker orchestration, and project skeleton so that all subsequent feature work has a working foundation to build on.
+
+**Prerequisite:** None (this is the starting phase).
+
+---
+
+| # | Step | Description | Definition of Done |
+|---|------|-------------|-------------------|
+| 1.1 | **Create project directory structure** | Establish the canonical folder layout: `backend/` (FastAPI app), `backend/app/` (source), `backend/app/services/` (business logic), `backend/app/models/` (schemas), `backend/tests/` (pytest), `frontend/` (placeholder HTML page), `db/` (SQLite volume mount point), `documentation/` (existing docs), and root config files (`.env.example`, `.gitignore`, `docker-compose.yml`). | All folders exist in repo; `.gitignore` covers `__pycache__`, `.env`, `*.db`, `ollama_data/`, `node_modules/`. |
+| 1.2 | **Define Python dependencies** | Create `backend/requirements.txt` listing: `fastapi`, `uvicorn[standard]`, `python-plexapi`, `ollama`, `pydantic>=2.0`, `sqlalchemy>=2.0`, `aiosqlite`, `httpx`, `pytest`, `pytest-asyncio`. Pin major versions for reproducibility. | File exists and `pip install -r requirements.txt` succeeds in a clean Python 3.11 venv. |
+| 1.3 | **Write the backend Dockerfile** | Create `backend/Dockerfile` based on `python:3.11-slim`. Copy source, install deps, expose port 8000, set the entrypoint to `uvicorn app.main:app --host 0.0.0.0 --port 8000`. | `docker build -t plex-playlist-backend ./backend` succeeds with no errors. |
+| 1.4 | **Write `docker-compose.yml` — services skeleton** | Define three services: `app` (builds from `./backend`), `ollama` (image `ollama/ollama`), and `frontend` (nginx or static). Create an `internal` bridge network. Expose app on host port 8000 and frontend on host port 3000. | `docker compose config` validates without errors. |
+| 1.5 | **Configure GPU passthrough for Ollama** | Add the NVIDIA `deploy.resources.reservations.devices` block to the `ollama` service. Set env `OLLAMA_HOST=0.0.0.0:11434`. Volume-mount `./ollama_data:/root/.ollama` for model persistence. | `docker compose up ollama` starts; `nvidia-smi` inside the container shows the GPU. |
+| 1.6 | **Create `.env.example` and environment loading** | Define all required env vars: `PLEX_URL`, `PLEX_TOKEN`, `OLLAMA_BASE_URL` (default `http://ollama:11434`), `DEFAULT_MODEL` (default `llama3.2:3b`), `CLIENT_NAME`. Wire into `docker-compose.yml` via `env_file: .env`. | Copying `.env.example` → `.env` and filling values allows `docker compose up` to inject them correctly. |
+| 1.7 | **Bootstrap the FastAPI application** | Create `backend/app/__init__.py` and `backend/app/main.py` with a minimal FastAPI app, a `GET /health` endpoint returning `{"status": "ok"}`, and CORS middleware allowing all origins (for dev). | After `docker compose up app`, `curl http://localhost:8000/health` returns 200 with the expected JSON. |
+| 1.8 | **Create the SQLite database schema** | Using SQLAlchemy, create `backend/app/models/database.py` defining: engine, session factory, Base. Create `backend/app/models/tables.py` with a `Track` model: `id` (PK auto), `rating_key` (unique int), `title` (str), `artist` (str), `album` (str nullable), `genre` (str nullable), `style` (str nullable), `has_sonic_analysis` (bool), `synced_at` (datetime). Add an init function that creates all tables on startup. | On app start-up, `db/library_cache.db` is created with the `tracks` table visible via `sqlite3`. |
+| 1.9 | **Verify end-to-end Docker Compose stack** | Run `docker compose up --build`. Confirm all services start. Backend responds on `/health`. Ollama API responds inside the `app` container via `http://ollama:11434/api/tags`. Document the verification steps in a checklist. | All containers healthy; `/health` 200; Ollama reachable from app container. |
