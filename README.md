@@ -9,7 +9,7 @@
 | Phase | Description | Status |
 |-------|-------------|--------|
 | 1 | Infrastructure & Scaffolding | ✅ Complete |
-| 2 | Core Backend (Data & LLM) | 🔲 Planned |
+| 2 | Core Backend (Data & LLM) | ✅ Complete |
 | 3 | Sonic Fulfillment & Playback | 🔲 Planned |
 | 4 | Frontend & Polish | 🔲 Planned |
 
@@ -49,6 +49,23 @@ curl http://localhost:8000/health
 | `ollama` | 11434 | LLM inference engine (GPU) |
 | `frontend` | 3000 | Web UI (nginx) |
 
+### Phase 2 API Endpoints
+
+```bash
+# Sync library metadata from Plex to local SQLite cache
+curl -X POST http://localhost:8000/api/sync
+
+# Check sync progress
+curl http://localhost:8000/api/sync/status
+# → {"synced_tracks": 1234, "total_tracks": 1234, "last_synced_at": "...", "in_progress": false}
+
+# Generate a playlist from natural language
+curl -X POST http://localhost:8000/api/suggest \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt": "upbeat 90s rock for a morning run", "track_count": 20}'
+# → {"name": "...", "description": "...", "tracks": [...]}
+```
+
 ## Project Structure
 
 ```
@@ -62,14 +79,31 @@ plex_playlist/
 │   │   │   ├── __init__.py
 │   │   │   ├── database.py      # SQLAlchemy engine & session
 │   │   │   └── tables.py        # ORM table definitions
+│   │   ├── api/
+│   │   │   ├── __init__.py
+│   │   │   ├── sync.py          # POST /api/sync, GET /api/sync/status
+│   │   │   └── suggest.py       # POST /api/suggest
 │   │   └── services/
-│   │       └── __init__.py
+│   │       ├── __init__.py
+│   │       ├── plex_client.py   # Plex server connection utility
+│   │       ├── sync.py          # Library metadata sync
+│   │       ├── library_search.py# SQLite query helpers
+│   │       ├── prompt_processor.py # NLP + LLM prompt builder
+│   │       └── ollama_client.py # Ollama API integration + retry
 │   ├── tests/
 │   │   ├── __init__.py
 │   │   ├── conftest.py          # Shared fixtures (in-memory DB, test client)
 │   │   ├── test_config.py
 │   │   ├── test_database.py
-│   │   └── test_health.py
+│   │   ├── test_health.py
+│   │   ├── test_plex_client.py
+│   │   ├── test_sync.py
+│   │   ├── test_library_search.py
+│   │   ├── test_schemas.py
+│   │   ├── test_prompt_processor.py
+│   │   ├── test_ollama_client.py
+│   │   ├── test_api_sync.py
+│   │   └── test_api_suggest.py
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   └── pytest.ini
@@ -81,6 +115,7 @@ plex_playlist/
 │   ├── PHASE_1_INFRASTRUCTURE.md
 │   ├── PHASE_1_VERIFICATION.md
 │   ├── PHASE_2_CORE_BACKEND.md
+│   ├── PHASE_2_VERIFICATION.md
 │   ├── PHASE_3_SONIC_PLAYBACK.md
 │   └── PHASE_4_FRONTEND_POLISH.md
 ├── docker-compose.yml

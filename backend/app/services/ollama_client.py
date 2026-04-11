@@ -1,0 +1,174 @@
+"""
+Ollama API integration with retry and over-request logic.
+
+Calls the Ollama chat endpoint using the ollama Python library in async
+mode. Enforces structured JSON output via format=PlaylistResponse schema.
+
+Retry strategy:
+  - Max 3 attempts per call.
+  - On JSON parse failure → immediate retry.
+  - On under-count → re-prompt asking for 50% more tracks.
+  - On connection error → re-raise immediately.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+
+from ollama import AsyncClient, ResponseError
+
+from app.config import settings
+from app.models.schemas import PlaylistResponse, SuggestedTrack
+
+logger = logging.getLogger(__name__)
+
+MAX_ATTEMPTS = 3
+
+
+class OllamaError(RuntimeError):
+    """Raised when Ollama is unreachable or returns an error."""
+
+
+def _deduplicate_tracks(tracks: list[SuggestedTrack]) -> list[SuggestedTrack]:
+    """Remove duplicate tracks (same title + artist, case-insensitive)."""
+    seen: set[tuple[str, str]] = set()
+    unique: list[SuggestedTrack] = []
+    for t in tracks:
+        key = (t.title.lower(), t.artist.lower())
+        if key not in seen:
+            seen.add(key)
+            unique.append(t)
+    return unique
+
+
+async def _call_ollama(
+    system_prompt: str,
+    user_message: str,
+    track_count: int,
+    attempt: int,
+) -> PlaylistResponse:
+    """Make a single chat call to Ollama and parse the response.
+
+    Raises:
+        json.JSONDecodeError: If the response is not valid JSON.
+        OllamaError: If the Ollama service returns an error.
+    """
+    client = AsyncClient(host=settings.OLLAMA_BASE_URL)
+    schema = PlaylistResponse.model_json_schema()
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+    logger.info(
+        "[Ollama attempt %d/%d] Calling model '%s' for %d tracks …",
+        attempt, MAX_ATTEMPTS, settings.DEFAULT_MODEL, track_count,
+    )
+    try:
+        response = await client.chat(
+            model=settings.DEFAULT_MODEL,
+            messages=messages,
+            format=schema,
+            options={"temperature": 0},
+        )
+    except ResponseError as exc:
+        raise OllamaError(
+            f"Ollama API error (attempt {attempt}): {exc}"
+        ) from exc
+    except Exception as exc:
+        raise OllamaError(
+            f"Cannot reach Ollama at '{settings.OLLAMA_BASE_URL}' "
+            f"(attempt {attempt}): {exc}"
+        ) from exc
+
+    raw: str = response.message.content
+    logger.debug("[attempt %d] Raw response: %d chars.", attempt, len(raw))
+    return PlaylistResponse.model_validate(json.loads(raw))
+
+
+async def generate_playlist(
+    system_prompt: str,
+    user_message: str,
+    track_count: int,
+) -> PlaylistResponse:
+    """Orchestrate Ollama calls with retry and over-request logic.
+
+    Attempt flow:
+      1. Call Ollama with the given prompts.
+      2. If JSON parse fails → log and retry (max MAX_ATTEMPTS).
+      3. If returned tracks < track_count → ask for 50% more, accumulate,
+         deduplicate, then trim to track_count on success.
+      4. After MAX_ATTEMPTS failures → raise OllamaError.
+
+    Args:
+        system_prompt: System context message.
+        user_message:  User request message.
+        track_count:   Desired number of tracks in the final playlist.
+
+    Returns:
+        PlaylistResponse with up to track_count deduplicated tracks.
+
+    Raises:
+        OllamaError: If all attempts fail or Ollama is unreachable.
+    """
+    all_tracks: list[SuggestedTrack] = []
+    current_message = user_message
+    current_count = track_count
+    last_playlist: PlaylistResponse | None = None
+
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            playlist = await _call_ollama(
+                system_prompt, current_message, current_count, attempt,
+            )
+            last_playlist = playlist
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "[attempt %d/%d] JSON parse failed: %s — retrying.",
+                attempt, MAX_ATTEMPTS, exc,
+            )
+            if attempt == MAX_ATTEMPTS:
+                raise OllamaError(
+                    f"Ollama returned invalid JSON after {MAX_ATTEMPTS} attempts."
+                ) from exc
+            continue
+        except OllamaError:
+            raise  # Propagate connection errors immediately
+
+        all_tracks.extend(playlist.tracks)
+        all_tracks = _deduplicate_tracks(all_tracks)
+        got = len(all_tracks)
+        logger.info(
+            "[attempt %d/%d] Got %d tracks (total dedup: %d / %d).",
+            attempt, MAX_ATTEMPTS, len(playlist.tracks), got, track_count,
+        )
+
+        if got >= track_count:
+            return PlaylistResponse(
+                name=playlist.name,
+                description=playlist.description,
+                tracks=all_tracks[:track_count],
+            )
+
+        # Under-count: re-prompt for more tracks
+        shortfall = track_count - got
+        extra_needed = max(shortfall, track_count // 2)
+        logger.warning(
+            "[attempt %d/%d] Under-count (%d/%d) — requesting %d more.",
+            attempt, MAX_ATTEMPTS, got, track_count, extra_needed,
+        )
+        current_count = extra_needed
+        current_message = (
+            f"The previous response only had {got} tracks. "
+            f"Please provide {extra_needed} MORE different tracks "
+            "for the same request. Do not repeat previously suggested tracks."
+        )
+
+    # Exhausted retries — return best effort
+    name = last_playlist.name if last_playlist else "Generated Playlist"
+    desc = last_playlist.description if last_playlist else "Partial results."
+    logger.warning(
+        "Returning %d tracks after %d attempts (requested %d).",
+        len(all_tracks), MAX_ATTEMPTS, track_count,
+    )
+    return PlaylistResponse(name=name, description=desc, tracks=all_tracks[:track_count])

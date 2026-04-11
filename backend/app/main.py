@@ -13,6 +13,8 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api import suggest as suggest_router
+from app.api import sync as sync_router
 from app.config import settings
 from app.models.database import init_db
 
@@ -83,3 +85,10 @@ async def health_check() -> dict:
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "version": app.version,
     }
+
+
+# ---------------------------------------------------------------------------
+# Register API routers
+# ---------------------------------------------------------------------------
+app.include_router(sync_router.router)
+app.include_router(suggest_router.router)
