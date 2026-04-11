@@ -1,0 +1,29 @@
+# =============================================================================
+# Plex Playlist — Python Dependencies
+# =============================================================================
+
+# Web framework
+fastapi>=0.104,<1.0
+uvicorn[standard]>=0.24,<1.0
+
+# Plex media server interface
+PlexAPI>=4.15,<5.0
+
+# LLM inference via Ollama
+ollama>=0.3,<1.0
+
+# Data validation & structured output
+pydantic>=2.0,<3.0
+pydantic-settings>=2.0,<3.0
+
+# Database (async SQLite via SQLAlchemy)
+sqlalchemy>=2.0,<3.0
+aiosqlite>=0.19,<1.0
+
+# HTTP client
+httpx>=0.25,<1.0
+
+# Testing
+pytest>=7.0,<9.0
+pytest-asyncio>=0.23,<1.0
+pytest-cov>=4.0,<6.0

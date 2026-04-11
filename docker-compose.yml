@@ -1,0 +1,68 @@
+# =============================================================================
+# Plex Playlist — Docker Compose Orchestration
+# =============================================================================
+version: "3.8"
+
+services:
+  # ---------------------------------------------------------------------------
+  # Backend — FastAPI application
+  # ---------------------------------------------------------------------------
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: plex-playlist-app
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      - ./db:/app/db
+    networks:
+      - internal
+    depends_on:
+      - ollama
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Ollama — LLM inference engine with GPU passthrough
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: plex-playlist-ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+    ports:
+      - "11434:11434"
+    volumes:
+      - ./ollama_data:/root/.ollama
+    networks:
+      - internal
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Frontend — Static file server (nginx)
+  # ---------------------------------------------------------------------------
+  frontend:
+    image: nginx:alpine
+    container_name: plex-playlist-frontend
+    ports:
+      - "3000:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+    networks:
+      - internal
+    depends_on:
+      - app
+    restart: unless-stopped
+
+networks:
+  internal:
+    driver: bridge
