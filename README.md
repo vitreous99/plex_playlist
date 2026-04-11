@@ -10,6 +10,7 @@ Plex Playlist is a middleware application that brings natural-language playlist 
 - **Local Inference:** Fully private using Ollama, pulling no external data.
 - **Direct Playback:** Dispatches playlists straight to your chosen Plex client.
 - **Automatic Sync:** Syncs your music library metadata on first start.
+- **Sonic Expansion:** Uses Plex's Neural Analysis (Sonic Similarity and Sonic Adventure) to expand seed tracks into full playlists and bridge styles.
 
 ## Architecture
 
@@ -20,7 +21,7 @@ graph TD;
     FastAPI -->|Fetch Library Context| SQLite[(SQLite Cache)];
     FastAPI -->|Generate Request| Ollama[Ollama LLM];
     Ollama -->|Structured Playlist| FastAPI;
-    FastAPI -->|Play/Save| Plex[Plex Media Server];
+    FastAPI -->|Match & Sonic Expand| Plex[Plex Media Server];
     Plex -->|Stream Media| Client([Plex Client]);
 ```
 
@@ -50,11 +51,12 @@ graph TD;
 
 3. **Start the application:**
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
 4. **Access the application:**
-   Open your browser and navigate to: `http://localhost:3000`
+   Open your browser and navigate to: `http://localhost:3033`
+   (Note: Make sure to check the exact port mapped in your docker-compose if you change it. By default it is 3033).
 
 ## Usage Guide
 
@@ -68,4 +70,3 @@ graph TD;
 - **GPU not detected:** Ensure the NVIDIA Container Toolkit is installed and configured for Docker.
 - **Client not found:** Ensure your Plex client is currently active on your network and not asleep (e.g., wake up your Apple TV or Shield).
 - **Empty library / No tracks:** Ensure your Plex server has a Music library and that the initial sync completed successfully.
-

@@ -1,11 +1,9 @@
 from fastapi import APIRouter
+from app.services.client_dispatcher import get_clients as fetch_clients
 
 router = APIRouter(prefix="/api/clients", tags=["Clients"])
 
 @router.get("")
 async def get_clients():
-    """Get available Plex clients (Phase 3 Stub)."""
-    return [
-        {"name": "Web Client", "identifier": "web-1", "product": "Plex Web", "address": "127.0.0.1"},
-        {"name": "Shield TV", "identifier": "shield-1", "product": "Plex for Android", "address": "192.168.1.10"}
-    ]
+    """Get available Plex clients."""
+    return fetch_clients()

@@ -27,7 +27,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // --- Fetch Clients ---
 async function fetchClients() {
     try {
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/clients`);
         if (!res.ok) throw new Error('Failed to fetch clients');
         const clients = await res.json();
@@ -50,7 +50,7 @@ async function fetchClients() {
 // --- Sync Management ---
 async function fetchSyncStatus() {
     try {
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/sync/status`);
         if (!res.ok) return;
         const status = await res.json();
@@ -74,7 +74,7 @@ async function fetchSyncStatus() {
 
 document.getElementById('btn-sync').addEventListener('click', async () => {
     try {
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/sync`, { method: 'POST' });
         if (!res.ok) throw new Error('Failed to start sync');
         showToast('Library sync started');
@@ -98,7 +98,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     document.getElementById('results-container').classList.add('hidden');
     
     try {
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/suggest`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -159,7 +159,7 @@ document.getElementById('btn-play').addEventListener('click', async () => {
     
     try {
         const prompt = document.getElementById('prompt').value;
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/playlist/play`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -190,7 +190,7 @@ document.getElementById('btn-save').addEventListener('click', async () => {
     
     try {
         const prompt = document.getElementById('prompt').value;
-        const baseUrl = window.location.port === '3000' ? 'http://localhost:8000' : '';
+        const baseUrl = window.location.port === '3033' ? 'http://localhost:8033' : '';
         const res = await fetch(`${baseUrl}/api/playlist/save`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
