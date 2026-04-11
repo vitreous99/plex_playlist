@@ -1,7 +1,6 @@
 # =============================================================================
 # Plex Playlist — Docker Compose Orchestration
 # =============================================================================
-version: "3.8"
 
 services:
   # ---------------------------------------------------------------------------
@@ -13,7 +12,7 @@ services:
       dockerfile: Dockerfile
     container_name: plex-playlist-app
     ports:
-      - "8000:8000"
+      - "8033:8000"
     env_file:
       - .env
     volumes:
@@ -33,7 +32,7 @@ services:
     environment:
       - OLLAMA_HOST=0.0.0.0:11434
     ports:
-      - "11434:11434"
+      - "11433:11434"
     volumes:
       - ./ollama_data:/root/.ollama
     networks:
@@ -54,7 +53,7 @@ services:
     image: nginx:alpine
     container_name: plex-playlist-frontend
     ports:
-      - "3000:80"
+      - "3033:80"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
