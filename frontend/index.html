@@ -5,22 +5,196 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Plex Playlist</title>
     <style>
+        :root {
+            --bg-color: #1a1a2e;
+            --text-color: #e0e0e0;
+            --primary: #e5a00d;
+            --secondary: #2a2a4e;
+            --border: #3a3a5e;
+            --error: #e74c3c;
+            --success: #2ecc71;
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            max-width: 600px;
-            margin: 80px auto;
+            max-width: 800px;
+            margin: 40px auto;
             padding: 0 20px;
-            background: #1a1a2e;
-            color: #e0e0e0;
-            text-align: center;
+            background: var(--bg-color);
+            color: var(--text-color);
+            line-height: 1.6;
         }
-        h1 { color: #e5a00d; }
-        p  { color: #aaa; }
+
+        h1, h2, h3 { color: var(--primary); }
+
+        .container {
+            background: var(--secondary);
+            padding: 24px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 24px;
+        }
+
+        .input-group {
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        input[type="text"], input[type="number"], select {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: #111122;
+            color: white;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+
+        .row {
+            display: flex;
+            gap: 16px;
+        }
+
+        .col { flex: 1; }
+
+        button {
+            background: var(--primary);
+            color: #111;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: opacity 0.2s;
+        }
+
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        button.secondary { background: var(--border); color: white; }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .status-badge {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            background: var(--border);
+        }
+
+        .status-badge.ok { color: var(--success); }
+        .status-badge.error { color: var(--error); }
+
+        .track-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .track-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+
+        .track-item:last-child { border-bottom: none; }
+        .track-title { font-weight: bold; font-size: 1.1em; }
+        .track-artist { color: #aaa; }
+        .track-reasoning { font-size: 0.9em; color: #888; margin-top: 4px; font-style: italic; }
+
+        .actions {
+            margin-top: 20px;
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+
+        .hidden { display: none !important; }
+
+        #loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--primary);
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 24px;
+            border-radius: 4px;
+            color: white;
+            opacity: 0;
+            transition: opacity 0.3s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--error); }
     </style>
 </head>
 <body>
-    <h1>🎵 Plex Playlist</h1>
-    <p>Intelligent Semantic Music Orchestrator</p>
-    <p><em>Frontend coming in Phase 4. Backend API is live at <a href="http://localhost:8000/health" style="color:#e5a00d;">localhost:8000/health</a>.</em></p>
+    <div class="header">
+        <h1>🎵 Plex Playlist</h1>
+        <div class="status-panel">
+            <button id="btn-sync" class="secondary">Sync Library</button>
+            <span id="sync-status" class="status-badge">Checking...</span>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>Generate Playlist</h2>
+        <div class="input-group">
+            <label for="prompt">What kind of music do you want to hear?</label>
+            <input type="text" id="prompt" placeholder="e.g., upbeat 90s rock for a workout" autocomplete="off">
+        </div>
+        <div class="row">
+            <div class="col input-group">
+                <label for="track-count">Number of Tracks</label>
+                <input type="number" id="track-count" value="20" min="1" max="100">
+            </div>
+            <div class="col input-group">
+                <label for="client">Playback Device</label>
+                <select id="client">
+                    <option value="">Loading devices...</option>
+                </select>
+            </div>
+        </div>
+        <button id="btn-generate">Generate</button>
+    </div>
+
+    <div id="results-container" class="container hidden">
+        <div class="header">
+            <h2 id="playlist-title">Generated Playlist</h2>
+            <div class="actions">
+                <button id="btn-play">Play</button>
+                <button id="btn-save" class="secondary">Save</button>
+            </div>
+        </div>
+        <p id="playlist-desc" style="color: #aaa; margin-top: 0;"></p>
+        
+        <ul id="track-list" class="track-list">
+            <!-- Tracks will be inserted here -->
+        </ul>
+    </div>
+
+    <div id="loading" class="hidden">
+        Generating your playlist... This may take a minute.
+    </div>
+
+    <div id="toast" class="toast">Message here</div>
+
+    <script src="app.js"></script>
 </body>
 </html>
