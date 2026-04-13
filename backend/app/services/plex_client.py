@@ -45,6 +45,10 @@ def get_server() -> PlexServer:
     url = settings.PLEX_URL
     token = settings.PLEX_TOKEN
 
+    # Ensure the URL contains a scheme; PlexAPI expects a full URL.
+    if "://" not in url:
+        url = "http://" + url
+
     if not token:
         raise PlexConnectionError(
             "PLEX_TOKEN is not set. "

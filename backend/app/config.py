@@ -12,13 +12,17 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Plex configuration
-    PLEX_URL: str = "http://localhost:32400"
+    PLEX_URL: str = "localhost:32400"
+    # Do not hard-code tokens in source; set `PLEX_TOKEN` in .env or environment.
     PLEX_TOKEN: str = ""
     CLIENT_NAME: str = "PlexPlaylist"
 
     # Ollama configuration
     OLLAMA_BASE_URL: str = "http://ollama:11434"
-    DEFAULT_MODEL: str = "llama3.2:3b"
+    DEFAULT_MODEL: str = "gemma:latest"
+
+    # ADB Bridge configuration
+    ADB_BRIDGE_URL: str = "http://adb-bridge:9000"
 
     # Database configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///db/library_cache.db"

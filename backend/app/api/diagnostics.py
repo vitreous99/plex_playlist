@@ -21,12 +21,21 @@ async def check_ollama_health() -> bool:
     except Exception:
         return False
 
+async def check_adb_health() -> bool:
+    try:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(f"{settings.ADB_BRIDGE_URL.rstrip('/')}/health", timeout=5.0)
+            return res.status_code == 200
+    except Exception:
+        return False
+
 @router.get("")
 async def get_diagnostics(session: AsyncSession = Depends(get_session)):
     """Get system health diagnostics."""
     diagnostics = {
         "plex": {"status": "unknown", "message": ""},
         "ollama": {"status": "unknown", "message": ""},
+        "adb_bridge": {"status": "unknown", "message": ""},
         "gpu": {"status": "unknown", "message": "Not detected"}, # Stubbed for now, could check via command line
         "sync": {"synced_tracks": 0, "last_sync": None},
         "model": settings.DEFAULT_MODEL
@@ -50,6 +59,16 @@ async def get_diagnostics(session: AsyncSession = Depends(get_session)):
             diagnostics["ollama"] = {"status": "error", "message": "Unreachable or unhealthy"}
     except Exception as e:
         diagnostics["ollama"] = {"status": "error", "message": str(e)}
+
+    # Check ADB Bridge
+    try:
+        is_healthy = await check_adb_health()
+        if is_healthy:
+            diagnostics["adb_bridge"] = {"status": "ok", "message": "Connected"}
+        else:
+            diagnostics["adb_bridge"] = {"status": "error", "message": "Unreachable or unhealthy"}
+    except Exception as e:
+        diagnostics["adb_bridge"] = {"status": "error", "message": str(e)}
 
     # Check Sync status
     try:

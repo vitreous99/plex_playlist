@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from typing import Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,7 +53,7 @@ MAX_CONTEXT_ITEMS = 40
 # ---------------------------------------------------------------------------
 
 
-def extract_keywords(prompt: str) -> list[str]:
+def extract_keywords(prompt: str, on_event: Optional[Callable] = None) -> list[str]:
     """Extract semantic keywords from a natural-language prompt.
 
     Lowercases, removes punctuation, splits on whitespace, then filters
@@ -60,6 +61,7 @@ def extract_keywords(prompt: str) -> list[str]:
 
     Args:
         prompt: Raw user input string.
+        on_event: Optional callback for streaming events.
 
     Returns:
         Ordered list of unique, meaningful keywords.
@@ -84,12 +86,14 @@ def extract_keywords(prompt: str) -> list[str]:
 async def build_context_pool(
     session: AsyncSession,
     keywords: list[str],
+    on_event: Optional[Callable] = None,
 ) -> dict[str, list[str]]:
     """Query the cache and return matching artists, genres, and sample tracks.
 
     Args:
         session:  Async DB session.
         keywords: Keywords extracted from the user prompt.
+        on_event: Optional callback for streaming events.
 
     Returns:
         Dict with keys "artists", "genres", "sample_tracks".
@@ -136,23 +140,25 @@ async def build_context_pool(
 _SYSTEM_PROMPT_TEMPLATE = """\
 You are an expert music curator for a personal Plex music library.
 Your task is to generate a playlist based on the user's request.
+
 You MUST only suggest tracks that could plausibly exist in the user's library.
+Focus on titles and artists that match the context provided below.
 
 ## Library Context
 
-Artists available (up to {max_items}):
+Artists available in library:
 {artists}
 
-Genres available (up to {max_items}):
+Genres available in library:
 {genres}
 
-Sample matching tracks:
+Sample matching tracks from your search:
 {sample_tracks}
 
 ## Instructions
-- Select exactly {track_count} tracks from this library.
-- Prioritise tracks matching the mood, genre, or feel of the request.
-- Prefer artists and genres listed in Library Context.
+- Select exactly {track_count} tracks from the user's library.
+- Suggest track titles and artists that exist in the context above.
+- Prioritise tracks matching the mood, genre, or feel of the user's request.
 - Provide a concise reasoning for each track (1-2 sentences).
 - Return ONLY a valid JSON object conforming to this schema:
 {schema}

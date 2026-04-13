@@ -234,6 +234,231 @@
 
         .hidden { display: none !important; }
 
+        /* Activity Feed Styling */
+        #activity-feed-container {
+            background: rgba(10, 12, 20, 0.95);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            color: #a8b9d0;
+            max-height: 500px;
+            overflow-y: auto;
+            box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.3);
+        }
+
+        #activity-feed {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .progress-bar-container {
+            width: 100%;
+            height: 24px;
+            background: rgba(50, 54, 82, 0.5);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 16px;
+            border: 1px solid var(--border);
+        }
+
+        .progress-bar {
+            height: 100%;
+            display: flex;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-segment {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.6);
+            position: relative;
+            min-width: 40px;
+        }
+
+        .progress-segment.prompt { background: linear-gradient(90deg, #e5a00d, #ffb822); }
+        .progress-segment.llm { background: linear-gradient(90deg, #6c63ff, #8b7eff); }
+        .progress-segment.matching { background: linear-gradient(90deg, #4caf50, #66bb6a); }
+        .progress-segment.sonic { background: linear-gradient(90deg, #2196f3, #42a5f5); }
+
+        .feed-line {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            padding: 6px 0;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        .feed-icon {
+            flex-shrink: 0;
+            width: 16px;
+            height: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-top: 2px;
+            font-size: 12px;
+        }
+
+        .feed-icon.phase-marker { color: var(--primary); font-weight: bold; }
+        .feed-icon.step { color: #8892b0; }
+        .feed-icon.success { color: var(--success); }
+        .feed-icon.error { color: var(--error); }
+        .feed-icon.track { color: var(--primary); }
+
+        .feed-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .feed-message {
+            color: #ccc;
+            line-height: 1.4;
+        }
+
+        .feed-detail {
+            color: #8892b0;
+            font-size: 12px;
+            margin-left: 28px;
+        }
+
+        .feed-timing {
+            flex-shrink: 0;
+            color: #6b7b93;
+            font-size: 12px;
+            font-weight: 500;
+            min-width: 50px;
+            text-align: right;
+        }
+
+        .track-card {
+            background: rgba(30, 33, 51, 0.6);
+            border-left: 3px solid var(--primary);
+            padding: 10px 12px;
+            margin: 4px 0 4px 28px;
+            border-radius: 4px;
+            animation: slideIn 0.4s ease-out;
+        }
+
+        .track-card.matched {
+            border-left-color: var(--success);
+        }
+
+        .track-card.unmatched {
+            border-left-color: var(--error);
+            opacity: 0.7;
+        }
+
+        .track-card-title {
+            font-weight: 600;
+            color: var(--text-color);
+            font-size: 13px;
+        }
+
+        .track-card-artist {
+            color: var(--primary);
+            font-size: 12px;
+            margin-top: 2px;
+        }
+
+        .track-card-match {
+            color: #8892b0;
+            font-size: 11px;
+            margin-top: 4px;
+            opacity: 0.8;
+        }
+
+        .summary-card {
+            background: linear-gradient(135deg, rgba(229, 160, 13, 0.1), rgba(107, 99, 255, 0.1));
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            margin-top: 16px;
+            animation: expandIn 0.4s ease-out;
+        }
+
+        .summary-title {
+            font-weight: bold;
+            color: var(--primary);
+            font-size: 13px;
+            margin-bottom: 12px;
+        }
+
+        .summary-stat {
+            display: flex;
+            justify-content: space-between;
+            margin: 6px 0;
+            font-size: 12px;
+        }
+
+        .summary-stat-label {
+            color: #8892b0;
+        }
+
+        .summary-stat-value {
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .timing-breakdown {
+            display: flex;
+            gap: 4px;
+            margin-top: 12px;
+            height: 20px;
+            width: 100%;
+            border-radius: 4px;
+            overflow: hidden;
+            background: rgba(50, 54, 82, 0.3);
+        }
+
+        .timing-segment {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: rgba(255, 255, 255, 0.6);
+        }
+
+        .timing-segment.prompt { background: linear-gradient(90deg, #e5a00d, #ffb822); }
+        .timing-segment.llm { background: linear-gradient(90deg, #6c63ff, #8b7eff); }
+        .timing-segment.matching { background: linear-gradient(90deg, #4caf50, #66bb6a); }
+        .timing-segment.sonic { background: linear-gradient(90deg, #2196f3, #42a5f5); }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-12px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes expandIn {
+            from {
+                opacity: 0;
+                transform: scaleY(0.95);
+                max-height: 0;
+            }
+            to {
+                opacity: 1;
+                transform: scaleY(1);
+                max-height: 500px;
+            }
+        }
+
         #loading {
             text-align: center;
             padding: 40px;
@@ -301,6 +526,7 @@
             .row { flex-direction: column; gap: 16px; }
             .header { flex-direction: column; gap: 20px; align-items: flex-start; }
             .status-panel { width: 100%; justify-content: space-between; }
+            #activity-feed-container { padding: 12px; font-size: 12px; }
         }
     </style>
 </head>
@@ -340,10 +566,21 @@
                     <option value="">Loading devices...</option>
                 </select>
             </div>
+            <div class="col input-group" style="display: flex; flex-direction: column; justify-content: flex-end;">
+                <button id="btn-wake" class="secondary" style="padding: 6px 12px; font-size: 14px; width: 100%;">⚡ Wake Shield</button>
+            </div>
         </div>
         <button id="btn-generate" style="width: 100%; margin-top: 10px;">
             ✨ Generate Magic Playlist
         </button>
+    </div>
+
+    <div id="activity-feed-container" class="container hidden">
+        <h2 style="margin-top: 0; margin-bottom: 16px;">Generation Progress</h2>
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progress-bar"></div>
+        </div>
+        <div id="activity-feed"></div>
     </div>
 
     <div id="results-container" class="container hidden">

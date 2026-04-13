@@ -26,7 +26,7 @@ def test_settings_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         PLEX_TOKEN="abc123",
     )
     assert s.OLLAMA_BASE_URL == "http://ollama:11434"
-    assert s.DEFAULT_MODEL == "llama3.2:3b"
+    assert s.DEFAULT_MODEL == "gemma"
     assert s.CLIENT_NAME == "PlexPlaylist"
 
 

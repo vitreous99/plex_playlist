@@ -9,23 +9,29 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, BackgroundTasks, status
 
-from app.models.database import get_session
 from app.models.schemas import SyncStatus
 from app.services import sync as sync_service
 from app.services.plex_client import PlexConnectionError
+from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/sync", tags=["Sync"])
 
 
-async def _run_sync_task(session: AsyncSession) -> None:
-    """Background task wrapper — catches and logs all errors."""
+async def _run_sync_task() -> None:
+    """Background task wrapper — catches and logs all errors.
+    
+    Creates its own database session to avoid issues with the request-scoped
+    session being closed before the background task completes.
+    """
+    from app.models.database import async_session_factory
+    
     try:
-        await sync_service.run_sync(session)
+        async with async_session_factory() as session:
+            await sync_service.run_sync(session)
     except PlexConnectionError as exc:
         logger.error("Background sync failed (Plex connection): %s", exc)
     except Exception:
@@ -40,7 +46,6 @@ async def _run_sync_task(session: AsyncSession) -> None:
 )
 async def trigger_sync(
     background_tasks: BackgroundTasks,
-    session: AsyncSession = Depends(get_session),
 ) -> dict:
     """Start a background metadata sync from Plex to the local SQLite cache.
 
@@ -57,7 +62,7 @@ async def trigger_sync(
             "status": current.model_dump(mode="json"),
         }
 
-    background_tasks.add_task(_run_sync_task, session)
+    background_tasks.add_task(_run_sync_task)
     logger.info("Sync job enqueued via POST /api/sync.")
     return {"message": "Library sync started.", "status": sync_service.get_sync_status().model_dump(mode="json")}
 
@@ -77,3 +82,22 @@ async def get_status() -> SyncStatus:
     - **in_progress** — whether a sync job is currently running.
     """
     return sync_service.get_sync_status()
+
+
+@router.get(
+    "/count",
+    summary="Get persisted track count",
+)
+async def get_persisted_count() -> dict:
+    """Return the number of tracks persisted in the SQLite cache.
+
+    This queries the on-disk SQLite file (so it reflects persisted state
+    even if the in-memory sync state was lost due to a restart).
+    """
+    from app.models.database import async_session_factory
+
+    async with async_session_factory() as session:
+        result = await session.execute(text("SELECT count(*) FROM tracks"))
+        count = result.scalar_one_or_none() or 0
+
+    return {"persisted_tracks": int(count)}

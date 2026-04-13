@@ -16,6 +16,7 @@ Design notes:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Optional
@@ -108,9 +109,9 @@ async def run_sync(session: AsyncSession) -> SyncStatus:
     logger.info("Library sync started.")
 
     try:
-        music_section = get_music_section()
+        music_section = await asyncio.to_thread(get_music_section)
         logger.info("Fetching all tracks from Plex library '%s' …", music_section.title)
-        tracks = music_section.searchTracks()
+        tracks = await asyncio.to_thread(music_section.searchTracks)
         total = len(tracks)
         _sync_state.total_tracks = total
         logger.info("Found %d tracks — beginning upsert loop.", total)

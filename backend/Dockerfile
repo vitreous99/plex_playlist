@@ -1,7 +1,7 @@
 # =============================================================================
 # Plex Playlist — Backend Dockerfile
 # =============================================================================
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # Prevent Python from buffering stdout/stderr (useful for Docker logs)
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Install system dependencies (minimal)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc && \
+    apt-get install -y --no-install-recommends gcc curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (layer caching)

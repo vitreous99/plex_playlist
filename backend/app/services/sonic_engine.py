@@ -5,7 +5,7 @@ Handles expansion of seed tracks using Plex's sonic analysis features.
 """
 
 import logging
-from typing import Sequence
+from typing import Callable, Optional, Sequence
 
 from plexapi.audio import Track as PlexTrack
 
@@ -17,7 +17,8 @@ logger = logging.getLogger(__name__)
 def expand_with_sonic_similarity(
     seed_tracks: Sequence[DbTrack],
     target_count: int = 20,
-    max_distance: float = 0.25
+    max_distance: float = 0.25,
+    on_event: Optional[Callable] = None,
 ) -> list[PlexTrack]:
     """
     Expand a list of seed tracks using Plex's sonicallySimilar feature.
@@ -26,6 +27,7 @@ def expand_with_sonic_similarity(
         seed_tracks: List of DbTrack objects to use as seeds.
         target_count: Desired length of the final playlist.
         max_distance: Maximum sonic distance for similarity.
+        on_event: Optional callback for streaming events.
         
     Returns:
         A deduplicated list of PlexTrack objects.
@@ -71,31 +73,75 @@ def expand_with_sonic_similarity(
 
     logger.info(f"Expanding {len(plex_seeds)} seeds. Need {remaining} more tracks. Fetching ~{per_seed} per seed.")
 
-    for ptrack in plex_seeds:
+    for seed_idx, ptrack in enumerate(plex_seeds):
         try:
-            # Check if track has sonic data by calling sonicallySimilar
-            # (PlexAPI might raise an error if not analyzed, or return empty list)
-            similar = ptrack.sonicallySimilar(limit=per_seed, maxDistance=max_distance)
+            # Emit event safely if callback provided
+            if on_event:
+                try:
+                    artist_name = getattr(ptrack.artist, 'title', 'Unknown') if hasattr(ptrack, 'artist') else "Unknown"
+                    on_event({
+                        "phase": "sonic",
+                        "step": f"sonic_seed_{seed_idx+1}",
+                        "message": f"Searching for tracks similar to: {ptrack.title}",
+                        "detail": {
+                            "seed_number": seed_idx + 1,
+                            "seed_title": str(ptrack.title),
+                            "seed_artist": str(artist_name),
+                        },
+                        "timing_ms": 0,
+                        "progress": 0.75 + (0.2 * (seed_idx / max(len(plex_seeds), 1))),
+                    })
+                except Exception as e:
+                    logger.debug(f"Error emitting sonic_seed event for '{ptrack.title}': {e}")
+
+            # Fetch similar tracks safely
+            try:
+                similar = ptrack.sonicallySimilar(limit=per_seed, maxDistance=max_distance)
+                if not similar:
+                    logger.debug(f"No similar tracks found for '{ptrack.title}'")
+                    continue
+            except Exception as e:
+                logger.warning(f"sonicallySimilar failed for '{ptrack.title}': {e}")
+                continue
             
+            # Process similar tracks with defensive checks
             for sim_track in similar:
-                if sim_track.ratingKey not in seen_keys:
-                    final_playlist.append(sim_track)
-                    seen_keys.add(sim_track.ratingKey)
+                try:
+                    # Defensive check for ratingKey attribute
+                    if not hasattr(sim_track, 'ratingKey'):
+                        logger.debug(f"Skipping track without ratingKey: {sim_track}")
+                        continue
                     
-                    if len(final_playlist) >= target_count:
-                        return final_playlist[:target_count]
+                    track_key = sim_track.ratingKey
+                    if track_key not in seen_keys:
+                        final_playlist.append(sim_track)
+                        seen_keys.add(track_key)
+                        
+                        if len(final_playlist) >= target_count:
+                            return final_playlist[:target_count]
+                except Exception as e:
+                    logger.debug(f"Error processing similar track: {e}")
+                    continue
+                    
         except Exception as e:
-            logger.debug(f"Could not get similar tracks for '{ptrack.title}': {e}")
+            logger.warning(f"Could not expand from seed '{ptrack.title}': {e}")
 
     return final_playlist
 
 def build_sonic_adventure(
     source_track: DbTrack,
     target_track: DbTrack,
-    target_count: int = 20
+    target_count: int = 20,
+    on_event: Optional[Callable] = None,
 ) -> list[PlexTrack]:
     """
     Build an acoustic path between two tracks using Plex's sonicAdventure.
+    
+    Args:
+        source_track: Starting track.
+        target_track: Ending track.
+        target_count: Desired number of intermediate tracks.
+        on_event: Optional callback for streaming events.
     """
     try:
         section = get_music_section()
@@ -116,26 +162,60 @@ def build_sonic_adventure(
         logger.error(f"Could not fetch tracks for sonic adventure: {e}")
         return []
 
+    if on_event:
+        try:
+            source_title = str(getattr(source_plex, 'title', 'Unknown'))
+            target_title = str(getattr(target_plex, 'title', 'Unknown'))
+            on_event({
+                "phase": "sonic",
+                "step": "sonic_adventure_start",
+                "message": f"Building transition from {source_title} to {target_title}",
+                "detail": {
+                    "source_title": source_title,
+                    "target_title": target_title,
+                },
+                "timing_ms": 0,
+                "progress": 0.75,
+            })
+        except Exception as e:
+            logger.debug(f"Error emitting sonic_adventure_start event: {e}")
+
     try:
-        # Request sonic adventure
+        # Request sonic adventure with error handling
         adventure_tracks = source_plex.sonicAdventure(to=target_plex)
+        if not adventure_tracks:
+            logger.warning("sonicAdventure returned no tracks")
+            return []
         
-        # Deduplicate and limit
+        # Deduplicate and limit with defensive checks
         final_path: list[PlexTrack] = []
         seen_keys: set[int] = set()
         
         for track in adventure_tracks:
-            if hasattr(track, 'ratingKey') and track.ratingKey not in seen_keys:
-                final_path.append(track)
-                seen_keys.add(track.ratingKey)
+            try:
+                if not hasattr(track, 'ratingKey'):
+                    logger.debug(f"Skipping adventure track without ratingKey: {track}")
+                    continue
+                    
+                track_key = track.ratingKey
+                if track_key not in seen_keys:
+                    final_path.append(track)
+                    seen_keys.add(track_key)
+            except Exception as e:
+                logger.debug(f"Error processing adventure track: {e}")
+                continue
+                
+        if not final_path:
+            logger.warning("No deduplicated tracks from sonic adventure")
+            return []
                 
         if len(final_path) > target_count:
             step = len(final_path) / target_count
             sampled = [final_path[int(i * step)] for i in range(target_count - 1)]
-            sampled.append(final_path[-1]) # Ensure target is reached
+            sampled.append(final_path[-1])  # Ensure target is reached
             return sampled
             
         return final_path
     except Exception as e:
-        logger.error(f"Sonic adventure failed: {e}")
+        logger.error(f"Sonic adventure failed: {e}", exc_info=True)
         return []

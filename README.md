@@ -70,3 +70,22 @@ graph TD;
 - **GPU not detected:** Ensure the NVIDIA Container Toolkit is installed and configured for Docker.
 - **Client not found:** Ensure your Plex client is currently active on your network and not asleep (e.g., wake up your Apple TV or Shield).
 - **Empty library / No tracks:** Ensure your Plex server has a Music library and that the initial sync completed successfully.
+
+## Configuration
+
+The backend reads environment variables from a `.env` file (pydantic settings). A sample is provided at [backend/.env.example](backend/.env.example).
+
+Minimum variables to set before running:
+- `PLEX_URL` — your Plex server address (e.g. `http://192.168.1.100:32400`).
+- `PLEX_TOKEN` — your Plex authentication token (required).
+- `OLLAMA_BASE_URL` — URL for Ollama (default `http://ollama:11434`).
+- `DEFAULT_MODEL` — model name for Ollama (default `gemma`).
+
+Quick setup (backend):
+```powershell
+cd backend
+cp .env.example .env
+# Edit .env and set PLEX_TOKEN and PLEX_URL
+# Run tests (optional):
+pytest -q
+```

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Callable, Optional
 
 from ollama import AsyncClient, ResponseError
 
@@ -47,8 +48,16 @@ async def _call_ollama(
     user_message: str,
     track_count: int,
     attempt: int,
+    on_event: Optional[Callable] = None,
 ) -> PlaylistResponse:
     """Make a single chat call to Ollama and parse the response.
+
+    Args:
+        system_prompt: System context message.
+        user_message: User request message.
+        track_count: Number of tracks requested.
+        attempt: Attempt number (1-based).
+        on_event: Optional callback for streaming events.
 
     Raises:
         json.JSONDecodeError: If the response is not valid JSON.
@@ -90,13 +99,14 @@ async def generate_playlist(
     system_prompt: str,
     user_message: str,
     track_count: int,
+    on_event: Optional[Callable] = None,
 ) -> PlaylistResponse:
     """Orchestrate Ollama calls with retry and over-request logic.
 
     Attempt flow:
       1. Call Ollama with the given prompts.
       2. If JSON parse fails → log and retry (max MAX_ATTEMPTS).
-      3. If returned tracks < track_count → ask for 50% more, accumulate,
+      3. If returned tracks < track_count → ask for significantly more, accumulate,
          deduplicate, then trim to track_count on success.
       4. After MAX_ATTEMPTS failures → raise OllamaError.
 
@@ -104,6 +114,7 @@ async def generate_playlist(
         system_prompt: System context message.
         user_message:  User request message.
         track_count:   Desired number of tracks in the final playlist.
+        on_event:      Optional callback for streaming events.
 
     Returns:
         PlaylistResponse with up to track_count deduplicated tracks.
@@ -115,11 +126,12 @@ async def generate_playlist(
     current_message = user_message
     current_count = track_count
     last_playlist: PlaylistResponse | None = None
+    total_requested = track_count  # Track cumulative requests for intelligent retry
 
     for attempt in range(1, MAX_ATTEMPTS + 1):
         try:
             playlist = await _call_ollama(
-                system_prompt, current_message, current_count, attempt,
+                system_prompt, current_message, current_count, attempt, on_event=on_event
             )
             last_playlist = playlist
         except json.JSONDecodeError as exc:
@@ -143,6 +155,27 @@ async def generate_playlist(
             attempt, MAX_ATTEMPTS, len(playlist.tracks), got, track_count,
         )
 
+        # Emit track_revealed events
+        if on_event:
+            for i, track in enumerate(playlist.tracks):
+                try:
+                    on_event({
+                        "phase": "llm",
+                        "step": f"track_{i+1}_revealed",
+                        "message": f"Track {i+1}: {track.title}",
+                        "detail": {
+                            "track_number": i + 1,
+                            "title": track.title,
+                            "artist": track.artist,
+                            "album": track.album or "",
+                            "reasoning": track.reasoning,
+                        },
+                        "timing_ms": 0,
+                        "progress": 0.3 + (0.2 * (i / max(len(playlist.tracks), 1))),
+                    })
+                except Exception as e:
+                    logger.debug(f"Error emitting track_revealed event: {e}")
+
         if got >= track_count:
             return PlaylistResponse(
                 name=playlist.name,
@@ -150,18 +183,30 @@ async def generate_playlist(
                 tracks=all_tracks[:track_count],
             )
 
-        # Under-count: re-prompt for more tracks
+        # Under-count: re-prompt for significantly more tracks
         shortfall = track_count - got
-        extra_needed = max(shortfall, track_count // 2)
+        attempts_remaining = MAX_ATTEMPTS - attempt
+        
+        # Request progressively more as attempts dwindle
+        if attempts_remaining == 2:
+            extra_needed = int(shortfall * 1.5)  # 150% of shortfall on 2nd attempt
+        elif attempts_remaining == 1:
+            extra_needed = int(shortfall * 2.0)  # 200% of shortfall on final attempt
+        else:
+            extra_needed = shortfall + (track_count // 2)  # shortfall + 50% buffer
+        
         logger.warning(
-            "[attempt %d/%d] Under-count (%d/%d) — requesting %d more.",
+            "[attempt %d/%d] Under-count (%d/%d) — requesting %d more (%.1f%% boost).",
             attempt, MAX_ATTEMPTS, got, track_count, extra_needed,
+            (extra_needed / max(shortfall, 1)) * 100.0,
         )
         current_count = extra_needed
+        total_requested += extra_needed
         current_message = (
-            f"The previous response only had {got} tracks. "
-            f"Please provide {extra_needed} MORE different tracks "
-            "for the same request. Do not repeat previously suggested tracks."
+            f"The previous response only had {got} tracks total. "
+            f"Please provide {extra_needed} MORE completely different tracks "
+            "for the same request. Do not repeat any previously suggested tracks. "
+            "Provide a diverse set to maximize matching likelihood."
         )
 
     # Exhausted retries — return best effort
