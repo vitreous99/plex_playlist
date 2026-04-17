@@ -387,6 +387,13 @@ async def event_stream_generator(
             # Cache the result
             _cache_set(generation_id, playlist_response, final_tracks)
 
+            # Build reasoning lookup from LLM suggestions (case-insensitive)
+            reasoning_map: dict[str, str] = {}
+            for s in playlist_response.tracks:
+                key = s.title.strip().lower()
+                if s.reasoning:
+                    reasoning_map[key] = s.reasoning
+
             # Yield final complete event with all data
             final_event = StreamEvent(
                 phase="complete",
@@ -399,7 +406,13 @@ async def event_stream_generator(
                     "tracks": [
                         {
                             "title": t.title if hasattr(t, "title") else str(t),
-                            "artist": t.artist if hasattr(t, "artist") else "",
+                            "artist": (
+                                getattr(t, "grandparentTitle", None)
+                                or (t.artist if isinstance(getattr(t, "artist", None), str) else "")
+                            ),
+                            "reasoning": reasoning_map.get(
+                                (t.title if hasattr(t, "title") else "").strip().lower(), ""
+                            ),
                         }
                         for t in final_tracks[:10]  # First 10 tracks in detail
                     ],

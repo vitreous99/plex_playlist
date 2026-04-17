@@ -1,17 +1,9 @@
 {
-  "TCP": {
-    "443": {
-      "HTTPS": true
-    }
-  },
   "Web": {
     "plex-playlist.tailfc42bf.ts.net:443": {
       "Handlers": {
-        "/api/": {
-          "Proxy": "http://app:8000/api/"
-        },
         "/": {
-          "Proxy": "http://frontend:80"
+          "Proxy": "http://127.0.0.1:80"
         }
       }
     }

@@ -9,10 +9,20 @@ FROM python:3.13-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies: ADB tools
+# Install system dependencies: Google platform-tools ADB + network diagnostics
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    android-tools-adb \
+    wget \
+    unzip \
+    iputils-ping \
+    iproute2 \
+    && wget -q https://dl.google.com/android/repository/platform-tools-latest-linux.zip -O /tmp/pt.zip \
+    && unzip -q /tmp/pt.zip -d /opt \
+    && rm /tmp/pt.zip \
+    && apt-get purge -y wget unzip \
+    && apt-get autoremove -y \
     && rm -rf /var/lib/apt/lists/*
+
+ENV PATH="/opt/platform-tools:${PATH}"
 
 # Copy requirements first (layer caching)
 COPY requirements.txt .

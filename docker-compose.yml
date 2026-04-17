@@ -48,6 +48,8 @@ services:
     container_name: plex-playlist-adb-bridge
     env_file:
       - .env
+    volumes:
+      - ./adb-keys:/root/.android
     networks:
       - internal
     restart: unless-stopped
@@ -62,31 +64,24 @@ services:
   # via HTTPS on your Tailscale network at plex-playlist.tailXXXX.ts.net
   tailscale:
     image: tailscale/tailscale:latest
-    hostname: plex-playlist
     container_name: plex-playlist-tailscale
+    network_mode: service:frontend
     env_file:
       - .env
     environment:
       - TS_STATE_DIR=/var/lib/tailscale
       - TS_USERSPACE=true
       - TS_SERVE_CONFIG=/config/serve.json
+      - TS_HOSTNAME=plex-playlist
     volumes:
       - tailscale-state:/var/lib/tailscale
       # Config directory (read-only) for Serve configuration
       - ${PWD}/tailscale-config:/config:ro
       # Startup helper script (waits for app to be reachable before starting tailscaled)
       - ${PWD}/scripts/tailscale-wait-and-run.sh:/usr/local/bin/tailscale-wait-and-run.sh:ro
-    networks:
-      - internal
     depends_on:
-      - app
+      - frontend
     restart: unless-stopped
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-      - SYS_MODULE
-    security_opt:
-      - apparmor=unconfined
     healthcheck:
       test: ["CMD", "tailscale", "status", "--peers=false"]
       interval: 10s

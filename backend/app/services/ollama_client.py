@@ -183,8 +183,20 @@ async def generate_playlist(
                 tracks=all_tracks[:track_count],
             )
 
-        # Under-count: re-prompt for significantly more tracks
+        # Close enough — accept ≥90% to avoid expensive retry for 1-2 tracks
         shortfall = track_count - got
+        if shortfall <= max(1, track_count // 10):
+            logger.info(
+                "[attempt %d/%d] Close enough (%d/%d) — returning partial result.",
+                attempt, MAX_ATTEMPTS, got, track_count,
+            )
+            return PlaylistResponse(
+                name=playlist.name,
+                description=playlist.description,
+                tracks=all_tracks[:track_count],
+            )
+
+        # Under-count: re-prompt for significantly more tracks
         attempts_remaining = MAX_ATTEMPTS - attempt
         
         # Request progressively more as attempts dwindle

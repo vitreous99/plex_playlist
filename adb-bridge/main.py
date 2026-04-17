@@ -53,6 +53,27 @@ class WakeResponse(BaseModel):
 # ============================================================================
 # ADB Helper Functions
 # ============================================================================
+async def run_shell_command(cmd: list, timeout: float = 10.0) -> tuple[bool, str]:
+    """
+    Execute an arbitrary shell command asynchronously.
+    """
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(), timeout=timeout
+        )
+        output = (stdout + stderr).decode("utf-8", errors="replace").strip()
+        return process.returncode == 0, output
+    except asyncio.TimeoutError:
+        return False, f"Command timed out after {timeout}s"
+    except Exception as e:
+        return False, f"Error: {str(e)}"
+
+
 async def run_adb_command(args: list, timeout: float = ADB_TIMEOUT) -> tuple[bool, str]:
     """
     Execute an ADB command asynchronously.
@@ -65,6 +86,8 @@ async def run_adb_command(args: list, timeout: float = ADB_TIMEOUT) -> tuple[boo
         (success: bool, output: str) — True if command succeeded, False otherwise.
         output contains stdout/stderr joined together.
     """
+    cmd_str = f"adb {' '.join(args)}"
+    logger.info(f"Running: {cmd_str} (timeout={timeout}s)")
     try:
         process = await asyncio.create_subprocess_exec(
             "adb",
@@ -76,20 +99,24 @@ async def run_adb_command(args: list, timeout: float = ADB_TIMEOUT) -> tuple[boo
         stdout, stderr = await asyncio.wait_for(
             process.communicate(), timeout=timeout
         )
-        output = (stdout + stderr).decode("utf-8", errors="replace").strip()
+        stdout_str = stdout.decode("utf-8", errors="replace").strip()
+        stderr_str = stderr.decode("utf-8", errors="replace").strip()
+        output = f"{stdout_str}\n{stderr_str}".strip()
 
         success = process.returncode == 0
-        logger.info(f"ADB command {'succeeded' if success else 'failed'}: {' '.join(args)}")
-        if output:
-            logger.debug(f"ADB output: {output}")
+        logger.info(
+            f"ADB {'OK' if success else 'FAIL'} (rc={process.returncode}): {cmd_str}\n"
+            f"  stdout: {stdout_str or '(empty)'}\n"
+            f"  stderr: {stderr_str or '(empty)'}"
+        )
 
         return success, output
 
     except asyncio.TimeoutError:
-        logger.error(f"ADB command timed out ({timeout}s): {' '.join(args)}")
+        logger.error(f"ADB TIMEOUT ({timeout}s): {cmd_str}")
         return False, f"Command timed out after {timeout}s"
     except Exception as e:
-        logger.error(f"ADB command error: {e}")
+        logger.error(f"ADB EXCEPTION: {cmd_str} -> {e}")
         return False, f"Error: {str(e)}"
 
 
@@ -162,7 +189,7 @@ async def wake(ip: Optional[str] = None) -> WakeResponse:
     # Step 2: Wake the device (send key event)
     logger.info(f"Step 2/4: Sending KEYCODE_WAKEUP to {adb_device_spec}")
     wake_success, wake_output = await run_adb_command(
-        ["shell", "-s", adb_device_spec, "input", "keyevent", "KEYCODE_WAKEUP"],
+        ["-s", adb_device_spec, "shell", "input", "keyevent", "KEYCODE_WAKEUP"],
         timeout=ADB_TIMEOUT,
     )
     if not wake_success:
@@ -173,7 +200,7 @@ async def wake(ip: Optional[str] = None) -> WakeResponse:
     plexamp_component = f"{PLEXAMP_PACKAGE}/{PLEXAMP_ACTIVITY}"
     logger.info(f"Step 3/4: Launching {plexamp_component}")
     launch_success, launch_output = await run_adb_command(
-        ["shell", "-s", adb_device_spec, "am", "start", "-n", plexamp_component],
+        ["-s", adb_device_spec, "shell", "am", "start", "-n", plexamp_component],
         timeout=ADB_TIMEOUT,
     )
     if not launch_success:
@@ -218,3 +245,48 @@ async def disconnect(ip: Optional[str] = None) -> WakeResponse:
         timestamp=datetime.now(timezone.utc),
         adb_output=output,
     )
+
+
+@app.get("/debug/network")
+async def debug_network(ip: Optional[str] = None):
+    """
+    Network diagnostics: ping, route check, ADB device list, and
+    port reachability for the Shield.
+    """
+    target_host = ip or SHIELD_IP
+    target_adb = f"{target_host}:5555"
+    results = {}
+
+    # Container's own IP / routes
+    ok, out = await run_shell_command(["ip", "addr", "show"], timeout=5)
+    results["container_interfaces"] = out
+
+    ok, out = await run_shell_command(["ip", "route"], timeout=5)
+    results["container_routes"] = out
+
+    # Ping the Shield (3 packets, 2s deadline)
+    ok, out = await run_shell_command(
+        ["ping", "-c", "3", "-W", "2", target_host], timeout=10
+    )
+    results["ping"] = {"success": ok, "output": out}
+
+    # ADB version
+    ok, out = await run_adb_command(["version"], timeout=5)
+    results["adb_version"] = out
+
+    # ADB devices
+    ok, out = await run_adb_command(["devices", "-l"], timeout=5)
+    results["adb_devices"] = out
+
+    # Quick ADB connect attempt with short timeout
+    ok, out = await run_adb_command(["connect", target_adb], timeout=15)
+    results["adb_connect"] = {"success": ok, "output": out}
+
+    # Environment
+    results["config"] = {
+        "SHIELD_IP": SHIELD_IP,
+        "target": target_adb,
+        "ADB_TIMEOUT": ADB_TIMEOUT,
+    }
+
+    return results

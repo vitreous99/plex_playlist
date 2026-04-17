@@ -344,7 +344,11 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
                             currentPlaylist = {
                                 name: eventData.detail?.playlist_name,
                                 description: eventData.detail?.playlist_description,
-                                tracks: eventData.detail?.tracks || [],
+                                tracks: (eventData.detail?.tracks || []).map(t => ({
+                                    title: t.title,
+                                    artist: t.artist,
+                                    reasoning: t.reasoning || '',
+                                })),
                             };
                             saveState();
                             displaySummaryCard(eventData);
@@ -387,6 +391,7 @@ function displayResults(data) {
             li.innerHTML = `
                 <div class="track-title">${escapeHtml(track.title)}</div>
                 <div class="track-artist">${escapeHtml(track.artist)}</div>
+                ${track.reasoning ? `<div class="track-reasoning">${escapeHtml(track.reasoning)}</div>` : ''}
             `;
             list.appendChild(li);
         });

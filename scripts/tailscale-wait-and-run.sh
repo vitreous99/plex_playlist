@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-APP_HOST="${APP_HOST:-frontend}"
+APP_HOST="${APP_HOST:-127.0.0.1}"
 APP_PORT="${APP_PORT:-80}"
 MAX_ATTEMPTS=60
 WAIT_INTERVAL=2
@@ -17,6 +17,8 @@ ATTEMPTS=0
 while [ $ATTEMPTS -lt $MAX_ATTEMPTS ]; do
     if nc -z "$APP_HOST" "$APP_PORT" 2>/dev/null; then
         echo "[$(date)] ✓ App is reachable at $APP_HOST:$APP_PORT"
+        # Wait additional time for FastAPI to be fully ready after port opens
+        sleep 3
         break
     fi
     ATTEMPTS=$((ATTEMPTS + 1))
