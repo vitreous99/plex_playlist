@@ -3,6 +3,24 @@
 # =============================================================================
 
 services:
+  ts-plex:
+      image: tailscale/tailscale:latest
+      container_name: plex-playlist-tailscale
+      hostname: plex-playlist
+      environment:
+        - TS_AUTHKEY=tskey-auth-kLzY5nugK321CNTRL-1W7NkoHFjKiF1YH4c8QjKi2qZRJkvQjQ
+        - TS_STATE_DIR=/var/lib/tailscale
+        - TS_SERVE_CONFIG=/config/serve.json # Add this if you use 'tailscale serve'
+      volumes:
+        - ./ts_state:/var/lib/tailscale
+        - ./tailscale-config:/config  # <--- Add this line
+        - /dev/net/tun:/dev/net/tun
+      networks:
+        - internal  # <--- CRITICAL: Add this line
+      cap_add:
+        - NET_ADMIN
+        - SYS_MODULE
+      restart: unless-stopped  
   # ---------------------------------------------------------------------------
   # Backend — FastAPI application
   # ---------------------------------------------------------------------------
@@ -19,6 +37,10 @@ services:
       - ./db:/app/db
     networks:
       - internal
+      - nyx_protocol_nyx-net # <--- Add the Nyx network here
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # <--- Add this!
+    
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------
@@ -50,54 +72,17 @@ services:
       - .env
     volumes:
       - ./adb-keys:/root/.android
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # <--- Add this!
+      
     networks:
       - internal
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Tailscale — Private tailnet access via Serve
-  # ---------------------------------------------------------------------------
-  # Start with: `docker compose --profile tailscale up -d`
-  # Requires TS_AUTHKEY in .env and tailscale-config/serve.json configured
-  #
-  # This sidecar runs Tailscale Serve to expose the FastAPI backend
-  # via HTTPS on your Tailscale network at plex-playlist.tailXXXX.ts.net
-  tailscale:
-    image: tailscale/tailscale:latest
-    container_name: plex-playlist-tailscale
-    network_mode: service:frontend
-    env_file:
-      - .env
-    environment:
-      - TS_STATE_DIR=/var/lib/tailscale
-      - TS_USERSPACE=true
-      - TS_SERVE_CONFIG=/config/serve.json
-      - TS_HOSTNAME=plex-playlist
-    volumes:
-      - tailscale-state:/var/lib/tailscale
-      # Config directory (read-only) for Serve configuration
-      - ${PWD}/tailscale-config:/config:ro
-      # Startup helper script (waits for app to be reachable before starting tailscaled)
-      - ${PWD}/scripts/tailscale-wait-and-run.sh:/usr/local/bin/tailscale-wait-and-run.sh:ro
-    depends_on:
-      - frontend
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "tailscale", "status", "--peers=false"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    # Wait for app to be reachable before launching tailscaled
-    # to avoid Serve race conditions
-    command: ["sh", "/usr/local/bin/tailscale-wait-and-run.sh"]
-    profiles:
-      - tailscale
-
 networks:
   internal:
     driver: bridge
-
+  nyx_protocol_nyx-net:
+      external: true  # This tells Docker "Don't create this, look for it."
 volumes:
   tailscale-state:
-    driver: local
