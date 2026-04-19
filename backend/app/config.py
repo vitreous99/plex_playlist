@@ -12,17 +12,22 @@ class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     # Plex configuration
-    PLEX_URL: str = "localhost:32400"
+    PLEX_URL: str = "http://127.0.0.1:32400"
+    # LAN URL used when dispatching playback to clients — must be the address
+    # reachable by all LAN devices (not 127.0.0.1). Plex clients receive this
+    # address so they can stream media locally without going via plex.tv relay.
+    PLEX_LAN_URL: str = "http://127.0.0.1:32400"
     # Do not hard-code tokens in source; set `PLEX_TOKEN` in .env or environment.
     PLEX_TOKEN: str = ""
     CLIENT_NAME: str = "PlexPlaylist"
 
     # Ollama configuration
-    OLLAMA_BASE_URL: str = "http://ollama:11434"
+    # App runs network_mode:host so Docker service names don't resolve; use 127.0.0.1.
+    OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"
     DEFAULT_MODEL: str = "gemma:latest"
 
     # ADB Bridge configuration
-    ADB_BRIDGE_URL: str = "http://adb-bridge:9000"
+    ADB_BRIDGE_URL: str = "http://127.0.0.1:9001"
 
     # Database configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///db/library_cache.db"

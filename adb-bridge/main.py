@@ -21,7 +21,7 @@ SHIELD_IP = os.getenv("SHIELD_IP", "192.168.1.100")
 PLEXAMP_PACKAGE = os.getenv("PLEXAMP_PACKAGE", "com.plexapp.plexamp")
 PLEXAMP_ACTIVITY = os.getenv("PLEXAMP_ACTIVITY", ".MainActivity")
 WAKE_DELAY_SECONDS = int(os.getenv("WAKE_DELAY_SECONDS", "8"))
-ADB_TIMEOUT = 10.0  # seconds
+ADB_TIMEOUT = 20.0  # seconds
 
 # ============================================================================
 # Logging

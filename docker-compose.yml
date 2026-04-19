@@ -56,15 +56,18 @@ services:
       dockerfile: Dockerfile
     container_name: plex-playlist-adb-bridge
     ports:
-      # ADDED: Because the app is now on the host, the bridge must expose its port 
-      # so the app can reach it at 127.0.0.1:9000
-      - "9001:9000"
+      # Bind to localhost only so the host-mode app can reach adb-bridge at
+      # 127.0.0.1:9000 without exposing it to external networks.
+      - "127.0.0.1:9001:9000"
     env_file:
       - .env
     volumes:
       - ./adb-keys:/root/.android
     networks:
       - internal
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     restart: unless-stopped
 
 networks:

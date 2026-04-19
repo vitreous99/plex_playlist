@@ -92,7 +92,7 @@ async def wake_device(shield_ip: Optional[str] = None) -> WakeClientResponse:
             clients=clients,
         )
 
-    except httpx.TimeoutError:
+    except httpx.TimeoutException:
         logger.error("Wake request timed out")
         return WakeClientResponse(
             status="error",

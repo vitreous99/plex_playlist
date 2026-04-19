@@ -28,6 +28,7 @@ class PlexConnectionError(RuntimeError):
 # Module-level singleton — created on first call to get_server()
 # ---------------------------------------------------------------------------
 _plex_server: PlexServer | None = None
+_plex_lan_server: PlexServer | None = None
 
 
 def get_server() -> PlexServer:
@@ -77,6 +78,41 @@ def get_server() -> PlexServer:
         raise PlexConnectionError(
             f"Could not connect to Plex server at '{url}': {exc}"
         ) from exc
+
+
+def get_lan_server() -> PlexServer:
+    """Return a PlexServer connected via the LAN URL.
+
+    Used for playback dispatch so the address passed to Plex clients is the
+    machine's actual LAN IP (e.g. 192.168.1.x), allowing clients to stream
+    media directly without going through plex.tv relay.
+
+    Falls back to get_server() if PLEX_LAN_URL is not set or is identical
+    to PLEX_URL.
+    """
+    global _plex_lan_server  # noqa: PLW0603
+
+    lan_url = settings.PLEX_LAN_URL
+    if not lan_url or lan_url == settings.PLEX_URL:
+        return get_server()
+
+    if _plex_lan_server is not None:
+        return _plex_lan_server
+
+    token = settings.PLEX_TOKEN
+    if "://" not in lan_url:
+        lan_url = "http://" + lan_url
+
+    logger.info("Connecting to Plex server via LAN at %s …", lan_url)
+    try:
+        _plex_lan_server = PlexServer(lan_url, token, timeout=30)
+        logger.info("LAN Plex connection established at %s.", lan_url)
+        return _plex_lan_server
+    except Exception as exc:
+        logger.warning(
+            "LAN Plex connection failed (%s), falling back to primary.", exc
+        )
+        return get_server()
 
 
 def reset_server() -> None:

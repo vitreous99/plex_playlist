@@ -13,7 +13,8 @@ function showToast(message, isError = false) {
 }
 
 function getBaseUrl() {
-    return window.location.port === '3033' ? 'http://localhost:8033' : '';
+    // Always use relative URLs — nginx proxies /api/ to the backend.
+    return '';
 }
 
 function escapeHtml(text) {
