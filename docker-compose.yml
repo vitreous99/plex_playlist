@@ -1,51 +1,40 @@
-# =============================================================================
-# Plex Playlist — Docker Compose Orchestration
-# =============================================================================
-
 services:
   ts-plex:
-      image: tailscale/tailscale:latest
-      container_name: plex-playlist-tailscale
-      hostname: plex-playlist
-      environment:
-        - TS_AUTHKEY=tskey-auth-kLzY5nugK321CNTRL-1W7NkoHFjKiF1YH4c8QjKi2qZRJkvQjQ
-        - TS_STATE_DIR=/var/lib/tailscale
-        - TS_SERVE_CONFIG=/config/serve.json # Add this if you use 'tailscale serve'
-      volumes:
-        - ./ts_state:/var/lib/tailscale
-        - ./tailscale-config:/config  # <--- Add this line
-        - /dev/net/tun:/dev/net/tun
-      networks:
-        - internal  # <--- CRITICAL: Add this line
-      cap_add:
-        - NET_ADMIN
-        - SYS_MODULE
-      restart: unless-stopped  
-  # ---------------------------------------------------------------------------
-  # Backend — FastAPI application
-  # ---------------------------------------------------------------------------
+    image: tailscale/tailscale:latest
+    container_name: plex-playlist-tailscale
+    hostname: plex-playlist
+    environment:
+      - TS_AUTHKEY=tskey-auth-kLzY5nugK321CNTRL-1W7NkoHFjKiF1YH4c8QjKi2qZRJkvQjQ
+      - TS_STATE_DIR=/var/lib/tailscale
+      - TS_SERVE_CONFIG=/config/serve.json
+    volumes:
+      - ./ts_state:/var/lib/tailscale
+      - ./tailscale-config:/config
+      - /dev/net/tun:/dev/net/tun
+    networks:
+      - internal
+      - nyx_protocol_nyx-net  
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    restart: unless-stopped  
+
   app:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: plex-playlist-app
-    ports:
-      - "8033:8000"
+    # CHANGED: Put the app directly on the host network so it can reach Plex at 127.0.0.1
+    network_mode: "host" 
+    # REMOVED: depends_on: ts-plex (no longer relying on it for networking)
     env_file:
       - .env
     volumes:
       - ./db:/app/db
-    networks:
-      - internal
-      - nyx_protocol_nyx-net # <--- Add the Nyx network here
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # <--- Add this!
-    
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # Frontend — Static file server (nginx)
-  # ---------------------------------------------------------------------------
   frontend:
     image: nginx:alpine
     container_name: plex-playlist-frontend
@@ -56,25 +45,24 @@ services:
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
     networks:
       - internal
-    depends_on:
-      - app
+    extra_hosts:
+      # ADDED: This allows Nginx to bridge out and talk to your host-mode app
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # ---------------------------------------------------------------------------
-  # ADB Bridge — Android Debug Bridge orchestration service
-  # ---------------------------------------------------------------------------
   adb-bridge:
     build:
       context: ./adb-bridge
       dockerfile: Dockerfile
     container_name: plex-playlist-adb-bridge
+    ports:
+      # ADDED: Because the app is now on the host, the bridge must expose its port 
+      # so the app can reach it at 127.0.0.1:9000
+      - "9001:9000"
     env_file:
       - .env
     volumes:
       - ./adb-keys:/root/.android
-    extra_hosts:
-      - "host.docker.internal:host-gateway" # <--- Add this!
-      
     networks:
       - internal
     restart: unless-stopped
@@ -83,6 +71,4 @@ networks:
   internal:
     driver: bridge
   nyx_protocol_nyx-net:
-      external: true  # This tells Docker "Don't create this, look for it."
-volumes:
-  tailscale-state:
+    external: true

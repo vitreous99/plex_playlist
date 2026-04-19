@@ -35,8 +35,7 @@ COPY main.py .
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-    CMD python -c "import httpx; httpx.get('http://localhost:9000/health', timeout=5.0)"
-
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:9000/health', timeout=5)" || exit 1
 # Expose port for HTTP API
 EXPOSE 9000
 
