@@ -21,6 +21,7 @@ from ollama import AsyncClient, ResponseError
 
 from app.config import settings
 from app.models.schemas import PlaylistResponse, SuggestedTrack
+from app.trace import get_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,13 @@ async def _call_ollama(
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_message},
     ]
+    
     logger.info(
-        "[Ollama attempt %d/%d] Calling model '%s' for %d tracks …",
+        "LLM_CALL | attempt=%d/%d | model=%s | track_count=%d | system_len=%d | user_len=%d",
         attempt, MAX_ATTEMPTS, settings.DEFAULT_MODEL, track_count,
+        len(system_prompt), len(user_message),
     )
+    
     try:
         response = await client.chat(
             model=settings.DEFAULT_MODEL,
@@ -91,8 +95,14 @@ async def _call_ollama(
         ) from exc
 
     raw: str = response.message.content
-    logger.debug("[attempt %d] Raw response: %d chars.", attempt, len(raw))
-    return PlaylistResponse.model_validate(json.loads(raw))
+    playlist = PlaylistResponse.model_validate(json.loads(raw))
+    
+    logger.info(
+        "LLM_RESPONSE | attempt=%d | response_len=%d | track_count=%d",
+        attempt, len(raw), len(playlist.tracks),
+    )
+    
+    return playlist
 
 
 async def generate_playlist(
@@ -122,6 +132,8 @@ async def generate_playlist(
     Raises:
         OllamaError: If all attempts fail or Ollama is unreachable.
     """
+    logger.info("GENERATE_PLAYLIST | START | requested_count=%d", track_count)
+    
     all_tracks: list[SuggestedTrack] = []
     current_message = user_message
     current_count = track_count
@@ -136,8 +148,8 @@ async def generate_playlist(
             last_playlist = playlist
         except json.JSONDecodeError as exc:
             logger.warning(
-                "[attempt %d/%d] JSON parse failed: %s — retrying.",
-                attempt, MAX_ATTEMPTS, exc,
+                "LLM_RETRY | attempt=%d/%d | reason=json_parse_failed | error=%s",
+                attempt, MAX_ATTEMPTS, str(exc)[:100],
             )
             if attempt == MAX_ATTEMPTS:
                 raise OllamaError(
@@ -151,8 +163,8 @@ async def generate_playlist(
         all_tracks = _deduplicate_tracks(all_tracks)
         got = len(all_tracks)
         logger.info(
-            "[attempt %d/%d] Got %d tracks (total dedup: %d / %d).",
-            attempt, MAX_ATTEMPTS, len(playlist.tracks), got, track_count,
+            "DEDUPLICATION | attempt=%d | raw=%d | deduped=%d | total=%d / %d",
+            attempt, len(playlist.tracks), got, got, track_count,
         )
 
         # Emit track_revealed events
@@ -177,10 +189,16 @@ async def generate_playlist(
                     logger.debug(f"Error emitting track_revealed event: {e}")
 
         if got >= track_count:
+            final_tracks = all_tracks[:track_count]
+            logger.info(
+                "GENERATE_PLAYLIST | COMPLETE | final_count=%d | requested_count=%d",
+                len(final_tracks),
+                track_count,
+            )
             return PlaylistResponse(
                 name=playlist.name,
                 description=playlist.description,
-                tracks=all_tracks[:track_count],
+                tracks=final_tracks,
             )
 
         # Close enough — accept ≥90% to avoid expensive retry for 1-2 tracks

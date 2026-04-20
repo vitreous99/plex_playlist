@@ -104,3 +104,43 @@ class SyncStatus(BaseModel):
     total_tracks: int = Field(default=0, ge=0)
     last_synced_at: Optional[datetime] = Field(default=None)
     in_progress: bool = Field(default=False)
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: Semantic Bridge schemas
+# ---------------------------------------------------------------------------
+
+
+class PlaylistIntent(BaseModel):
+    """Structured intent extracted from user prompt via Ollama (Gemma).
+
+    Attributes:
+        mood:        Desired emotional vibe (e.g., "relaxed", "energetic").
+        tempo:       Tempo preference (e.g., "slow", "medium", "fast").
+        genre_hint:  Primary genre preference (optional, e.g., "jazz").
+        exclude:     List of terms to exclude from results (e.g., ["christmas"]).
+    """
+
+    mood: str = Field(..., description="Desired emotional vibe.")
+    tempo: str = Field(..., description="Tempo preference (slow/medium/fast).")
+    genre_hint: str = Field(
+        default="",
+        description="Primary genre preference (optional).",
+    )
+    exclude: List[str] = Field(
+        default_factory=list,
+        description="Terms to exclude from results.",
+    )
+
+
+class SeedSelection(BaseModel):
+    """Indices of tracks selected as sonic seeds by Gemma.
+
+    Attributes:
+        indices: 1-based positions of chosen tracks in the candidate list.
+    """
+
+    indices: List[int] = Field(
+        ...,
+        description="1-based indices of selected tracks (e.g., [1, 3]).",
+    )

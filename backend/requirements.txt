@@ -27,3 +27,8 @@ httpx>=0.25,<1.0
 pytest>=7.0,<9.0
 pytest-asyncio>=0.23,<1.0
 pytest-cov>=4.0,<6.0
+
+# Phase 5: Semantic Bridge (vector search)
+sentence-transformers>=2.2,<3.0
+faiss-cpu>=1.8,<2.0          # For CPU; swap to faiss-gpu if CUDA available
+numpy>=1.24,<2.0

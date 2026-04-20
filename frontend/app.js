@@ -3,6 +3,10 @@ const API_BASE = '/api';
 // --- State ---
 let currentPlaylist = null;
 let currentGenerationId = null;
+// Per-step timings collected from SSE events
+let stepTimings = {};
+// Track generation start time for elapsed time display
+let generationStartTime = null;
 
 // --- UI Helpers ---
 function showToast(message, isError = false) {
@@ -188,10 +192,19 @@ document.getElementById('btn-wake').addEventListener('click', async () => {
 // --- Activity Feed Functions ---
 function addFeedLine(event) {
     const feed = document.getElementById('activity-feed');
+    // Record step timing and completion timestamp for summary
+    try {
+        stepTimings[event.step] = {
+            timing_ms: event.timing_ms || 0,
+            completed_at: event.completed_at || null,
+        };
+    } catch (e) {
+        // ignore malformed events
+    }
     let icon = '•', iconClass = 'feed-icon step';
     
-    if (event.step.includes('phase_start') || event.step.includes('phase_complete')) {
-        icon = event.step.includes('start') ? '▶' : '✓';
+    if (event.step.includes('_start') || event.step.includes('_complete') || event.step.includes('_warning')) {
+        icon = event.step.includes('_start') ? '▶' : (event.step.includes('_warning') ? '⚠' : '✓');
         iconClass = 'feed-icon phase-marker';
     } else if (event.step.includes('revealed')) {
         icon = '♪';
@@ -259,7 +272,30 @@ function displaySummaryCard(event) {
     const detail = event.detail || {};
     const totalTime = detail.total_time_ms || 0;
     const totalSeconds = (totalTime / 1000).toFixed(2);
-    
+    let perStepHtml = '';
+    const orderedSteps = [
+        ['prompt_start', 'Prompt start'],
+        ['keywords', 'Keywords extracted'],
+        ['context_pool', 'Context pool built'],
+        ['prompt_ready', 'System prompt ready'],
+        ['llm_call', 'LLM call started'],
+        ['llm_complete', 'LLM complete'],
+        ['matching_start', 'Matching started'],
+        ['matching_complete', 'Matching complete'],
+        ['sonic_start', 'Sonic expansion started'],
+        ['sonic_complete', 'Sonic expansion complete'],
+        ['generation_complete', 'Generation complete'],
+        ['done', 'Ready'],
+    ];
+
+    orderedSteps.forEach(([key, label]) => {
+        const info = stepTimings[key];
+        if (info) {
+            const ms = info.timing_ms || 0;
+            perStepHtml += `<div class="summary-step"><span class="summary-step-label">${label}</span><span class="summary-step-value">${ms}ms</span></div>`;
+        }
+    });
+
     let html = `<div class="summary-card">
         <div class="summary-title">✨ Generation Complete</div>
         <div class="summary-stat">
@@ -270,12 +306,7 @@ function displaySummaryCard(event) {
             <span class="summary-stat-label">Tracks Generated</span>
             <span class="summary-stat-value">${detail.final_track_count}</span>
         </div>` : ''}
-        <div class="timing-breakdown">
-            <div class="timing-segment prompt" style="width: 25%; min-width: 20px;"></div>
-            <div class="timing-segment llm" style="width: 25%; min-width: 20px;"></div>
-            <div class="timing-segment matching" style="width: 25%; min-width: 20px;"></div>
-            <div class="timing-segment sonic" style="width: 25%; min-width: 20px;"></div>
-        </div>
+        <div class="summary-steps">${perStepHtml}</div>
     </div>`;
     
     const card = document.createElement('div');
@@ -307,6 +338,9 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     
     const btn = document.getElementById('btn-generate');
     btn.disabled = true;
+    
+    // Track generation start time
+    generationStartTime = Date.now();
     
     try {
         const res = await fetch(`${getBaseUrl()}/api/playlist/generate-stream`, {
@@ -354,7 +388,6 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
                             saveState();
                             displaySummaryCard(eventData);
                             addFeedLine(eventData);
-                            setTimeout(() => displayResults(currentPlaylist), 300);
                         } else if (eventData.phase === 'error') {
                             addFeedLine(eventData);
                             showToast(`Error: ${eventData.message}`, true);

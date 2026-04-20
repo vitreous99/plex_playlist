@@ -43,19 +43,19 @@ class FakeDbTrack:
 class TestSseFormatStreamEvent:
     def test_basic_stream_event(self):
         event = StreamEvent(
-            phase="llm", step="phase_start", message="Calling LLM"
+            phase="llm", step="llm_call", message="Calling LLM"
         )
         result = sse_format(event)
         assert result.startswith("data: ")
         assert result.endswith("\n\n")
         payload = json.loads(result.removeprefix("data: "))
         assert payload["phase"] == "llm"
-        assert payload["step"] == "phase_start"
+        assert payload["step"] == "llm_call"
 
     def test_stream_event_with_detail(self):
         event = StreamEvent(
             phase="matching",
-            step="phase_complete",
+            step="matching_complete",
             message="Done",
             detail={"matched": 5, "total": 10},
             timing_ms=123,

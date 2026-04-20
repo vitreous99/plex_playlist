@@ -3,16 +3,20 @@ Tests for the prompt processor (prompt_processor.py).
 """
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.tables import Track
+from app.models.schemas import PlaylistIntent, SeedSelection
 from app.services.prompt_processor import (
     build_context_pool,
     build_prompt,
     build_system_prompt,
     extract_keywords,
+    parse_intent,
+    select_seeds,
 )
 
 
@@ -156,7 +160,9 @@ def test_build_system_prompt_empty_context() -> None:
 @pytest.mark.asyncio
 async def test_build_prompt_returns_tuple(db_session: AsyncSession) -> None:
     await _seed_tracks(db_session)
-    system_prompt, user_message = await build_prompt(db_session, "mellow jazz", 10)
+    system_prompt, user_message = await build_prompt(
+        db_session, "mellow jazz", search_terms=["jazz", "mellow"], track_count=10
+    )
     assert isinstance(system_prompt, str)
     assert isinstance(user_message, str)
     assert len(system_prompt) > 100
@@ -165,5 +171,148 @@ async def test_build_prompt_returns_tuple(db_session: AsyncSession) -> None:
 @pytest.mark.asyncio
 async def test_build_prompt_user_message_contains_prompt(db_session: AsyncSession) -> None:
     await _seed_tracks(db_session)
-    _, user_message = await build_prompt(db_session, "chill rainy jazz", 5)
+    _, user_message = await build_prompt(
+        db_session, "chill rainy jazz", search_terms=["jazz", "chill"], track_count=5
+    )
     assert "chill rainy jazz" in user_message
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: parse_intent() — structured intent extraction
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_parse_intent_returns_valid_intent() -> None:
+    """Test parse_intent returns a valid PlaylistIntent with required fields."""
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        # Mock Ollama response
+        mock_response = MagicMock()
+        mock_response.message.content = '{"mood": "relaxed", "tempo": "slow", "genre_hint": "jazz", "exclude": []}'
+        
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        intent = await parse_intent("chill Sunday morning")
+        
+        assert isinstance(intent, PlaylistIntent)
+        assert intent.mood == "relaxed"
+        assert intent.tempo == "slow"
+        assert intent.genre_hint == "jazz"
+        assert intent.exclude == []
+
+
+@pytest.mark.asyncio
+async def test_parse_intent_with_exclude_list() -> None:
+    """Test parse_intent correctly parses exclude list."""
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        mock_response = MagicMock()
+        mock_response.message.content = '{"mood": "happy", "tempo": "fast", "genre_hint": "", "exclude": ["christmas", "sad"]}'
+        
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        intent = await parse_intent("upbeat party songs, but no sad stuff")
+        
+        assert "christmas" in intent.exclude
+        assert "sad" in intent.exclude
+
+
+@pytest.mark.asyncio
+async def test_parse_intent_graceful_failure() -> None:
+    """Test parse_intent raises RuntimeError on Ollama failure."""
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(side_effect=Exception("Ollama unreachable"))
+        mock_client_class.return_value = mock_client
+
+        with pytest.raises(RuntimeError):
+            await parse_intent("any prompt")
+
+
+# ---------------------------------------------------------------------------
+# Phase 5: select_seeds() — seed selection
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_select_seeds_returns_valid_tracks() -> None:
+    """Test select_seeds returns Track objects from candidates."""
+    tracks = [
+        Track(rating_key=1, title="Blue in Green", artist="Miles Davis", genre="Jazz"),
+        Track(rating_key=2, title="Bohemian Rhapsody", artist="Queen", genre="Rock"),
+        Track(rating_key=3, title="So What", artist="Miles Davis", genre="Jazz"),
+    ]
+    
+    intent = PlaylistIntent(mood="relaxed", tempo="slow", genre_hint="jazz", exclude=[])
+    
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        mock_response = MagicMock()
+        # Now that genre-matched tracks are reordered first, indices [1, 2] select the two jazz tracks
+        mock_response.message.content = '{"indices": [1, 2]}'
+        
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        selected = await select_seeds(intent, tracks)
+        
+        assert len(selected) == 2
+        assert selected[0].title == "Blue in Green"
+        assert selected[1].title == "So What"
+
+
+@pytest.mark.asyncio
+async def test_select_seeds_respects_exclude_list() -> None:
+    """Test select_seeds filters candidates by exclude list."""
+    tracks = [
+        Track(rating_key=1, title="Blue in Green", artist="Miles Davis", genre="Jazz", style="Modal Jazz"),
+        Track(rating_key=2, title="Bohemian Rhapsody", artist="Queen", genre="Rock, Christmas"),
+        Track(rating_key=3, title="So What", artist="Miles Davis", genre="Jazz"),
+    ]
+    
+    intent = PlaylistIntent(mood="happy", tempo="medium", genre_hint="jazz", exclude=["christmas"])
+    
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        mock_response = MagicMock()
+        # Should only receive indices 1 and 2 (Bohemian excluded), so indices refer to filtered list
+        mock_response.message.content = '{"indices": [1, 2]}'
+        
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        selected = await select_seeds(intent, tracks)
+        
+        # Verify no "christmas" tracks selected
+        for track in selected:
+            assert "christmas" not in (track.genre or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_select_seeds_fallback_to_top_2() -> None:
+    """Test select_seeds returns top 2 on parsing failure."""
+    tracks = [
+        Track(rating_key=1, title="Track1", artist="Artist1", genre="Jazz"),
+        Track(rating_key=2, title="Track2", artist="Artist2", genre="Jazz"),
+        Track(rating_key=3, title="Track3", artist="Artist3", genre="Jazz"),
+    ]
+    
+    intent = PlaylistIntent(mood="relaxed", tempo="slow", genre_hint="", exclude=[])
+    
+    with patch("app.services.prompt_processor.AsyncClient") as mock_client_class:
+        # Invalid JSON response to trigger fallback
+        mock_response = MagicMock()
+        mock_response.message.content = "not valid json"
+        
+        mock_client = AsyncMock()
+        mock_client.chat = AsyncMock(return_value=mock_response)
+        mock_client_class.return_value = mock_client
+
+        selected = await select_seeds(intent, tracks)
+        
+        # Should fallback to top 2
+        assert len(selected) == 2
+        assert selected[0].title == "Track1"
+        assert selected[1].title == "Track2"
+

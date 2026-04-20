@@ -14,6 +14,7 @@ from app.services.plex_client import get_music_section
 
 logger = logging.getLogger(__name__)
 
+
 def expand_with_sonic_similarity(
     seed_tracks: Sequence[DbTrack],
     target_count: int = 20,
@@ -128,6 +129,7 @@ def expand_with_sonic_similarity(
 
     return final_playlist
 
+
 def build_sonic_adventure(
     source_track: DbTrack,
     target_track: DbTrack,
@@ -196,7 +198,7 @@ def build_sonic_adventure(
                 if not hasattr(track, 'ratingKey'):
                     logger.debug(f"Skipping adventure track without ratingKey: {track}")
                     continue
-                    
+
                 track_key = track.ratingKey
                 if track_key not in seen_keys:
                     final_path.append(track)

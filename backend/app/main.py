@@ -6,11 +6,12 @@ routes and middleware.
 """
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import suggest as suggest_router
@@ -22,14 +23,29 @@ from app.api import diagnostics as diagnostics_router
 from app.api import wake as wake_router
 from app.config import settings
 from app.models.database import init_db
+from app.trace import get_trace_id, set_trace_id, TraceIDFormatter
 
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
+
+# Configure logging with trace ID support
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    format="%(asctime)s | %(levelname)-8s | [%(trace_id)s] | %(name)s | %(message)s",
 )
+
+# Apply custom formatter to all handlers
+trace_formatter = TraceIDFormatter(
+    "%(asctime)s | %(levelname)-8s | [%(trace_id)s] | %(name)s | %(message)s"
+)
+root_logger = logging.getLogger()
+for handler in root_logger.handlers:
+    handler.setFormatter(trace_formatter)
+
+# Apply to uvicorn loggers specifically
+for uvicorn_logger_name in ['uvicorn', 'uvicorn.access', 'uvicorn.error']:
+    uvicorn_logger = logging.getLogger(uvicorn_logger_name)
+    for handler in uvicorn_logger.handlers:
+        handler.setFormatter(trace_formatter)
+
 logger = logging.getLogger("plex_playlist")
 
 
@@ -54,6 +70,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 # ---------------------------------------------------------------------------
+# Trace ID Middleware
+# ---------------------------------------------------------------------------
+async def trace_id_middleware(request: Request, call_next):
+    """Generate trace ID and inject into context for all downstream operations."""
+    # Check if client provided a trace ID header, otherwise generate one
+    trace_id = request.headers.get('X-Trace-ID')
+    if not trace_id:
+        # Generate a short random ID (8 chars: XXXXXXXX)
+        trace_id = secrets.token_hex(4)  # 8 hex chars
+    
+    # Set in context
+    set_trace_id(trace_id)
+    
+    # Add to response headers so client can correlate
+    response = await call_next(request)
+    response.headers['X-Trace-ID'] = trace_id
+    
+    logger.info("Request: %s %s", request.method, request.url.path)
+    
+    return response
+
+
+# ---------------------------------------------------------------------------
 # Application factory
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -73,6 +112,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Add trace ID middleware
+app.middleware("http")(trace_id_middleware)
 
 
 # ---------------------------------------------------------------------------

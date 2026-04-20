@@ -15,7 +15,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.database import get_session
 from app.models.schemas import PlaylistResponse, PromptRequest
 from app.services.ollama_client import OllamaError, generate_playlist
-from app.services.prompt_processor import build_prompt
+from app.services.prompt_processor import (
+    build_prompt,
+    extract_keywords,
+    parse_intent,
+)
+from app.trace import get_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -50,15 +55,33 @@ async def suggest_playlist(
     - 503 — Ollama service is unavailable.
     - 422 — Invalid request body (validation error).
     """
+    trace_id = get_trace_id()
     logger.info(
-        "POST /api/suggest — prompt=%r, track_count=%d",
+        "POST /api/suggest | trace_id=%s | prompt=%r | track_count=%d",
+        trace_id,
         request.prompt,
         request.track_count,
     )
 
     try:
+        # Parse intent to detect genre hints, mood, etc.
+        logger.info("Parsing intent from prompt: %r", request.prompt)
+        intent = await parse_intent(request.prompt)
+        logger.info(
+            "Parsed intent: genre_hint=%r, mood=%r, tempo=%r, exclude=%s",
+            intent.genre_hint,
+            intent.mood,
+            intent.tempo,
+            intent.exclude,
+        )
+        
+        # Extract keywords from the prompt
+        search_terms = extract_keywords(request.prompt)
+        logger.info("Extracted search terms: %s", search_terms)
+        
+        # Build prompt with search terms and intent
         system_prompt, user_message = await build_prompt(
-            session, request.prompt, request.track_count
+            session, request.prompt, search_terms, request.track_count, intent=intent
         )
     except Exception as exc:
         logger.exception("Failed to build prompt.")
@@ -92,8 +115,9 @@ async def suggest_playlist(
         )
 
     logger.info(
-        "Returning playlist '%s' with %d tracks.",
+        "Returning playlist '%s' with %d tracks | trace_id=%s",
         playlist.name,
         len(playlist.tracks),
+        trace_id,
     )
     return playlist

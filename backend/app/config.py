@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     # Database configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///db/library_cache.db"
 
+    # Tracing configuration
+    TRACE_ID_LENGTH: int = 8
+
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",

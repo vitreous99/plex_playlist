@@ -98,6 +98,7 @@ class StreamEvent:
     detail: dict[str, Any] = None  # Optional structured detail
     timing_ms: int = 0  # Elapsed time for this step
     progress: float = 0.0  # 0.0 to 1.0 overall progress
+    completed_at: str | None = None  # ISO-8601 timestamp when this event was emitted
 
 
 def sse_format(event: StreamEvent | dict) -> str:
@@ -113,7 +114,11 @@ def sse_format(event: StreamEvent | dict) -> str:
             "detail": event.detail or {},
             "timing_ms": event.timing_ms,
             "progress": event.progress,
+            "completed_at": event.completed_at,
         }
+    # Ensure every event has a completion timestamp added at format-time
+    if not data.get("completed_at"):
+        data["completed_at"] = datetime.now(timezone.utc).isoformat()
     return f"data: {json.dumps(data)}\n\n"
 
 
@@ -137,8 +142,10 @@ async def build_playlist_streamed(
     # Import here to avoid circular imports
     from app.services.prompt_processor import (
         extract_keywords,
+        parse_intent,
         build_context_pool,
         build_system_prompt,
+        select_seeds,
     )
     from app.services.ollama_client import generate_playlist
     from app.services.track_matcher import match_tracks
@@ -146,6 +153,8 @@ async def build_playlist_streamed(
         expand_with_sonic_similarity,
         build_sonic_adventure,
     )
+    from sqlalchemy import select
+    from app.models.tables import Track
 
     start_time = datetime.now(timezone.utc)
 
@@ -156,13 +165,114 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="prompt",
-            step="phase_start",
+            step="prompt_start",
             message="Preparing prompt and context...",
             progress=0.0,
         )
     )
 
-    # Extract keywords
+    # Phase 5: Parse intent
+    step_start = datetime.now(timezone.utc)
+    try:
+        intent = await parse_intent(prompt)
+        step_ms = int((datetime.now(timezone.utc) - step_start).total_seconds() * 1000)
+        on_event(
+            StreamEvent(
+                phase="prompt",
+                step="intent_parsed",
+                message=f"Intent: {intent.mood} mood, {intent.tempo} tempo",
+                detail={
+                    "mood": intent.mood,
+                    "tempo": intent.tempo,
+                    "genre_hint": intent.genre_hint,
+                    "exclude": intent.exclude,
+                },
+                timing_ms=step_ms,
+                progress=0.05,
+            )
+        )
+    except Exception as e:
+        logger.warning(f"Intent parsing failed: {e}; continuing with keyword extraction.")
+        intent = None
+
+    # Phase 5: Vector fetch (semantic search)
+    step_start = datetime.now(timezone.utc)
+    vector_query = None
+    vector_candidates = []
+    if intent:
+        # Build vector query: prioritize genre_hint if explicitly stated, else use mood/tempo
+        query_parts = []
+        if intent.genre_hint:
+            # Explicit genre request: emphasize it 3x for stronger signal
+            query_parts.append(intent.genre_hint)
+            query_parts.append(intent.genre_hint)  # Repeat for emphasis
+            if intent.mood:
+                query_parts.append(intent.mood)
+            if intent.tempo:
+                query_parts.append(intent.tempo)
+        else:
+            # No explicit genre: use mood/tempo as primary signals
+            if intent.mood:
+                query_parts.append(intent.mood)
+            if intent.tempo:
+                query_parts.append(intent.tempo)
+        
+        vector_query = " ".join(query_parts) if query_parts else None
+        
+        try:
+            from app.services.vector_index import search_vector_index
+            if vector_query:
+                rating_keys = search_vector_index(vector_query, top_k=40)
+            else:
+                rating_keys = []
+            if rating_keys:
+                result = await session.execute(
+                    select(Track).where(Track.rating_key.in_(rating_keys))
+                )
+                vector_candidates = list(result.scalars().all())
+                step_ms = int((datetime.now(timezone.utc) - step_start).total_seconds() * 1000)
+                on_event(
+                    StreamEvent(
+                        phase="prompt",
+                        step="vector_fetch",
+                        message=f"Found {len(vector_candidates)} semantically similar tracks",
+                        detail={
+                            "semantic_count": len(vector_candidates),
+                            "top_3": [t.title for t in vector_candidates[:3]],
+                        },
+                        timing_ms=step_ms,
+                        progress=0.08,
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"Vector search failed: {e}; using keyword matching.")
+            vector_candidates = []
+
+    # Phase 5: Seed selection (pick 2-3 best for sonic expansion)
+    step_start = datetime.now(timezone.utc)
+    selected_seeds = []
+    if intent and vector_candidates:
+        try:
+            selected_seeds = await select_seeds(intent, vector_candidates)
+            step_ms = int((datetime.now(timezone.utc) - step_start).total_seconds() * 1000)
+            on_event(
+                StreamEvent(
+                    phase="prompt",
+                    step="seed_selected",
+                    message=f"Selected {len(selected_seeds)} seeds for expansion",
+                    detail={
+                        "seed_count": len(selected_seeds),
+                        "seed_titles": [t.title for t in selected_seeds],
+                    },
+                    timing_ms=step_ms,
+                    progress=0.12,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"Seed selection failed: {e}; using top candidates.")
+            selected_seeds = vector_candidates[:2]
+
+    # Extract keywords (legacy support, for context pool)
     step_start = datetime.now(timezone.utc)
     keywords = extract_keywords(prompt)
     step_ms = int((datetime.now(timezone.utc) - step_start).total_seconds() * 1000)
@@ -173,13 +283,13 @@ async def build_playlist_streamed(
             message=f"Extracted {len(keywords)} keywords",
             detail={"keywords": keywords},
             timing_ms=step_ms,
-            progress=0.1,
+            progress=0.15,
         )
     )
 
-    # Build context pool
+    # Build context pool (now with vector_query if available)
     step_start = datetime.now(timezone.utc)
-    context_pool = await build_context_pool(session, keywords)
+    context_pool = await build_context_pool(session, keywords, vector_query=vector_query)
     step_ms = int((datetime.now(timezone.utc) - step_start).total_seconds() * 1000)
     on_event(
         StreamEvent(
@@ -192,7 +302,7 @@ async def build_playlist_streamed(
                 "sample_count": len(context_pool["sample_tracks"]),
             },
             timing_ms=step_ms,
-            progress=0.15,
+            progress=0.18,
         )
     )
 
@@ -211,7 +321,7 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="llm",
-            step="phase_start",
+            step="llm_call",
             message="Calling LLM to generate suggestions...",
             progress=0.2,
         )
@@ -226,7 +336,7 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="llm",
-            step="phase_complete",
+            step="llm_complete",
             message=f"LLM generated {len(playlist_response.tracks)} track suggestions",
             detail={
                 "tracks_count": len(playlist_response.tracks),
@@ -241,7 +351,7 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="matching",
-            step="phase_start",
+            step="matching_start",
             message=f"Matching {len(playlist_response.tracks)} suggestions to Plex library...",
             progress=0.5,
         )
@@ -269,7 +379,7 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="matching",
-            step="phase_complete",
+            step="matching_complete",
             message=f"Matched {len(matched)}/{len(playlist_response.tracks)} tracks",
             detail={"matched": len(matched), "total": len(playlist_response.tracks)},
             timing_ms=step_ms,
@@ -277,11 +387,11 @@ async def build_playlist_streamed(
         )
     )
 
-    # --- Phase 4: Sonic Expansion ---
+    # --- Phase 4: Sonic Expansion (Phase 5 now provides seeds if available) ---
     on_event(
         StreamEvent(
             phase="sonic",
-            step="phase_start",
+            step="sonic_start",
             message="Expanding playlist using sonic analysis...",
             progress=0.75,
         )
@@ -295,6 +405,9 @@ async def build_playlist_streamed(
     )
 
     try:
+        # Use Phase 5 seeds if available, else use matched tracks
+        expansion_seeds = selected_seeds if selected_seeds else matched
+        
         if is_transition and len(matched) >= 2:
             logger.info("Transition prompt detected. Using Sonic Adventure.")
             final_tracks = build_sonic_adventure(
@@ -304,9 +417,9 @@ async def build_playlist_streamed(
                 on_event=on_event,
             )
         else:
-            logger.info("Using standard Sonic Similarity expansion.")
+            logger.info(f"Using standard Sonic Similarity expansion with {len(expansion_seeds)} seed(s).")
             final_tracks = expand_with_sonic_similarity(
-                seed_tracks=matched,
+                seed_tracks=expansion_seeds,
                 target_count=track_count,
                 on_event=on_event,
             )
@@ -318,7 +431,7 @@ async def build_playlist_streamed(
         on_event(
             StreamEvent(
                 phase="sonic",
-                step="phase_warning",
+                step="sonic_warning",
                 message=f"Sonic expansion encountered an error, using {len(final_tracks)} matched tracks instead",
                 detail={"error": str(e)},
                 progress=0.95,
@@ -329,7 +442,7 @@ async def build_playlist_streamed(
     on_event(
         StreamEvent(
             phase="sonic",
-            step="phase_complete",
+            step="sonic_complete",
             message=f"Expanded to {len(final_tracks)} final tracks",
             detail={"final_count": len(final_tracks)},
             timing_ms=step_ms,
@@ -414,7 +527,7 @@ async def event_stream_generator(
                                 (t.title if hasattr(t, "title") else "").strip().lower(), ""
                             ),
                         }
-                        for t in final_tracks[:10]  # First 10 tracks in detail
+                        for t in final_tracks  # All tracks
                     ],
                     "total_tracks": len(final_tracks),
                 },

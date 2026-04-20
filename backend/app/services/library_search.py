@@ -106,6 +106,39 @@ async def get_distinct_genres(session: AsyncSession) -> list[str]:
     return genres
 
 
+async def get_artists_by_genres(
+    session: AsyncSession,
+    genres: list[str],
+) -> list[str]:
+    """Return distinct artists whose tracks match any of the given genres.
+
+    Filters artists to only those with tracks tagged in the provided genres.
+    Useful for genre-specific playlist context building.
+
+    Args:
+        session: Async DB session.
+        genres:  List of genre names to filter by.
+
+    Returns:
+        Sorted list of unique artist names for tracks in those genres.
+    """
+    if not genres:
+        logger.debug("get_artists_by_genres called with empty genres list.")
+        return []
+
+    # Build OR conditions for each genre (substring match)
+    conditions = []
+    for genre in genres:
+        pattern = f"%{genre}%"
+        conditions.append(Track.genre.ilike(pattern))
+
+    stmt = select(Track.artist).distinct().where(or_(*conditions)).order_by(func.lower(Track.artist))
+    result = await session.execute(stmt)
+    artists = [row for (row,) in result.all() if row]
+    logger.debug("get_artists_by_genres(%s) → %d artists.", genres, len(artists))
+    return artists
+
+
 async def get_tracks_by_artist(
     session: AsyncSession,
     artist: str,

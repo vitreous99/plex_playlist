@@ -48,7 +48,7 @@ async def build_playlist(
         seed_count = 2
     
     # Build the system prompt from context
-    keywords = extract_keywords(prompt, on_event=on_event)
+    keywords = extract_keywords(prompt)
     context_pool = await build_context_pool(session, keywords, on_event=on_event)
     system_prompt = build_system_prompt(context_pool, seed_count)
     

@@ -11,7 +11,7 @@ WORKDIR /app
 
 # Install system dependencies (minimal)
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends gcc curl ca-certificates && \
+    apt-get install -y --no-install-recommends build-essential curl ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies first (layer caching)

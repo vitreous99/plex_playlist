@@ -145,6 +145,17 @@ async def run_sync(session: AsyncSession) -> SyncStatus:
                 logger.debug("Upserted %d / %d tracks.", synced, total)
 
         await session.commit()
+        
+        # Phase 5: Build vector index for semantic search
+        try:
+            logger.info("Building vector index for semantic search...")
+            from app.services.vector_index import build_vector_index
+            await build_vector_index(session)
+            logger.info("Vector index built successfully.")
+        except Exception as e:
+            logger.error(f"Vector index build failed (non-fatal): {e}")
+            # Don't fail the sync if vectorization fails
+        
         _sync_state = SyncStatus(
             synced_tracks=synced,
             total_tracks=total,
