@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import traceback
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +8,7 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.database import get_session
 from app.services.playlist_builder import build_playlist
-from app.services.client_dispatcher import dispatch_playback
+from app.services.client_dispatcher import dispatch_playback_async
 from app.services.plex_client import get_server
 
 logger = logging.getLogger(__name__)
@@ -53,7 +54,7 @@ async def play_playlist(req: PlayRequest, session: AsyncSession = Depends(get_se
         raise HTTPException(status_code=404, detail="Could not generate a matching playlist.")
         
     try:
-        result = dispatch_playback(tracks, req.client_name)
+        result = await dispatch_playback_async(tracks, req.client_name)
         return {
             "message": f"Playback dispatched to {req.client_name}",
             "client": result["client"],
@@ -100,13 +101,10 @@ async def save_playlist(req: SaveRequest, session: AsyncSession = Depends(get_se
         
     try:
         server = get_server()
-        
-        # Determine the name. If it exists, plexapi might just create a duplicate
-        # or we might want to check and append a number. For simplicity, we just create.
         logger.info(f"Saving playlist '{name}' with {len(tracks)} tracks to Plex.")
         from plexapi.playlist import Playlist
-        Playlist.create(server, title=name, items=tracks)
-        
+        await asyncio.to_thread(Playlist.create, server, title=name, items=tracks)
+
         return {
             "message": f"Playlist '{name}' saved successfully",
             "playlist_name": name,

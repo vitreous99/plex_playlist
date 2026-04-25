@@ -44,6 +44,7 @@ async def match_tracks(
     """
     matched: list[Track] = []
     unmatched: list[SuggestedTrack] = []
+    matched_keys: set[int] = set()  # prevent the same DB row appearing twice
 
     for idx, suggestion in enumerate(suggestions):
         # First try exact match by title and artist
@@ -55,7 +56,9 @@ async def match_tracks(
         exact_match = result.scalars().first()
 
         if exact_match:
-            matched.append(exact_match)
+            if exact_match.rating_key not in matched_keys:
+                matched.append(exact_match)
+                matched_keys.add(exact_match.rating_key)
             logger.debug(f"Exact matched '{suggestion.title}' by '{suggestion.artist}'")
             if on_event:
                 try:
@@ -132,7 +135,9 @@ async def match_tracks(
         if best_match and best_score >= threshold:
             logger.debug(f"Fuzzy matched '{suggestion.title}' by '{suggestion.artist}' "
                          f"to '{best_match.title}' by '{best_match.artist}' (score: {best_score:.2f})")
-            matched.append(best_match)
+            if best_match.rating_key not in matched_keys:
+                matched.append(best_match)
+                matched_keys.add(best_match.rating_key)
             if on_event:
                 try:
                     on_event({
@@ -179,7 +184,9 @@ async def match_tracks(
                     f"to '{best_artist_match.title}' by '{best_artist_match.artist}' "
                     f"(title score: {best_title_score:.2f})"
                 )
-                matched.append(best_artist_match)
+                if best_artist_match.rating_key not in matched_keys:
+                    matched.append(best_artist_match)
+                    matched_keys.add(best_artist_match.rating_key)
                 if on_event:
                     try:
                         on_event({
@@ -206,7 +213,9 @@ async def match_tracks(
         if best_match and best_score >= 0.6:
             logger.info(f"Fuzzy matched (relaxed) '{suggestion.title}' by '{suggestion.artist}' "
                         f"to '{best_match.title}' by '{best_match.artist}' (score: {best_score:.2f})")
-            matched.append(best_match)
+            if best_match.rating_key not in matched_keys:
+                matched.append(best_match)
+                matched_keys.add(best_match.rating_key)
             if on_event:
                 try:
                     on_event({

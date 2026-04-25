@@ -15,6 +15,76 @@ from app.services.plex_client import get_music_section
 logger = logging.getLogger(__name__)
 
 
+def _get_bpm(track: PlexTrack) -> Optional[float]:
+    """Return the BPM of a PlexTrack, or None if unavailable."""
+    try:
+        return float(track.musicAnalysis.tempo)
+    except Exception:
+        return None
+
+
+def _sort_by_bpm_arc(
+    tracks: list[PlexTrack],
+    seed_tracks: list[PlexTrack],
+) -> list[PlexTrack]:
+    """Reorder *tracks* so BPM progresses from the first seed's energy to
+    the last seed's energy, with minimal jumps between adjacent tracks.
+
+    Strategy:
+    1.  Determine arc direction from the BPMs of the first and last seeds.
+    2.  Build N linearly-interpolated target BPMs across the playlist length.
+    3.  Greedy nearest-neighbour: for each position pick the remaining track
+        whose BPM is closest to the interpolated target.
+    4.  Tracks with no BPM are pooled and spliced into the middle so they
+        don't disrupt the opening or closing energy.
+    """
+    if len(tracks) <= 1:
+        return tracks
+
+    bpm_map: dict[int, Optional[float]] = {t.ratingKey: _get_bpm(t) for t in tracks}
+
+    with_bpm = [t for t in tracks if bpm_map[t.ratingKey] is not None]
+    without_bpm = [t for t in tracks if bpm_map[t.ratingKey] is None]
+
+    if not with_bpm:
+        # Nothing to sort — return as-is
+        return tracks
+
+    # Determine arc endpoints from seeds
+    seed_bpms = [_get_bpm(s) for s in seed_tracks if _get_bpm(s) is not None]
+    if len(seed_bpms) >= 2:
+        start_bpm = seed_bpms[0]
+        end_bpm = seed_bpms[-1]
+    elif len(seed_bpms) == 1:
+        start_bpm = end_bpm = seed_bpms[0]
+    else:
+        # No seed BPM info — fall back to ascending arc across observed range
+        all_bpms = [bpm_map[t.ratingKey] for t in with_bpm]
+        start_bpm = min(all_bpms)  # type: ignore[type-var]
+        end_bpm = max(all_bpms)    # type: ignore[type-var]
+
+    n = len(with_bpm)
+    target_bpms = [
+        start_bpm + (end_bpm - start_bpm) * (i / max(n - 1, 1))
+        for i in range(n)
+    ]
+
+    # Greedy nearest-neighbour pass
+    remaining = list(with_bpm)
+    ordered: list[PlexTrack] = []
+    for target in target_bpms:
+        best = min(remaining, key=lambda t: abs((bpm_map[t.ratingKey] or 0) - target))
+        ordered.append(best)
+        remaining.remove(best)
+
+    # Splice no-BPM tracks into the middle
+    if without_bpm:
+        mid = len(ordered) // 2
+        ordered = ordered[:mid] + without_bpm + ordered[mid:]
+
+    return ordered
+
+
 def expand_with_sonic_similarity(
     seed_tracks: Sequence[DbTrack],
     target_count: int = 20,
@@ -49,6 +119,11 @@ def expand_with_sonic_similarity(
             item = section.fetchItem(st.rating_key)
             # Relax the type check for tests that use mocks
             if hasattr(item, 'ratingKey') and hasattr(item, 'sonicallySimilar'):
+                if not getattr(item, 'hasSonicAnalysis', True):
+                    logger.debug(
+                        f"Seed '{item.title}' has no Plex sonic analysis — "
+                        "sonicallySimilar may return limited results"
+                    )
                 plex_seeds.append(item)
         except Exception as e:
             logger.warning(f"Could not fetch Plex track {st.rating_key}: {e}")
@@ -126,6 +201,9 @@ def expand_with_sonic_similarity(
                     
         except Exception as e:
             logger.warning(f"Could not expand from seed '{ptrack.title}': {e}")
+
+    if len(final_playlist) > 1:
+        final_playlist = _sort_by_bpm_arc(final_playlist, plex_seeds)
 
     return final_playlist
 

@@ -49,16 +49,17 @@ _UPSERT_SQL = text(
     """
     INSERT INTO tracks
         (rating_key, title, artist, album, genre, style,
-         has_sonic_analysis, synced_at)
+         bpm, has_sonic_analysis, synced_at)
     VALUES
         (:rating_key, :title, :artist, :album, :genre, :style,
-         :has_sonic_analysis, :synced_at)
+         :bpm, :has_sonic_analysis, :synced_at)
     ON CONFLICT(rating_key) DO UPDATE SET
         title              = excluded.title,
         artist             = excluded.artist,
         album              = excluded.album,
         genre              = excluded.genre,
         style              = excluded.style,
+        bpm                = excluded.bpm,
         has_sonic_analysis = excluded.has_sonic_analysis,
         synced_at          = excluded.synced_at
     """
@@ -124,6 +125,10 @@ async def run_sync(session: AsyncSession) -> SyncStatus:
             genre_str = _join_tags(getattr(track, "genres", []))
             style_str = _join_tags(getattr(track, "moods", []))
             has_sonic = bool(getattr(track, "hasSonicAnalysis", False))
+            try:
+                bpm: Optional[float] = float(track.musicAnalysis.tempo)
+            except Exception:
+                bpm = None
 
             await session.execute(
                 _UPSERT_SQL,
@@ -134,6 +139,7 @@ async def run_sync(session: AsyncSession) -> SyncStatus:
                     "album": album_name,
                     "genre": genre_str,
                     "style": style_str,
+                    "bpm": bpm,
                     "has_sonic_analysis": has_sonic,
                     "synced_at": now,
                 },
@@ -149,8 +155,9 @@ async def run_sync(session: AsyncSession) -> SyncStatus:
         # Phase 5: Build vector index for semantic search
         try:
             logger.info("Building vector index for semantic search...")
-            from app.services.vector_index import build_vector_index
+            from app.services.vector_index import build_vector_index, invalidate_search_singletons
             await build_vector_index(session)
+            invalidate_search_singletons()
             logger.info("Vector index built successfully.")
         except Exception as e:
             logger.error(f"Vector index build failed (non-fatal): {e}")

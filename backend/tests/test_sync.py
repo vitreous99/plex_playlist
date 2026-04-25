@@ -66,6 +66,7 @@ def _make_mock_track(
     genre_tags: list = None,
     mood_tags: list = None,
     has_sonic: bool = False,
+    bpm: float | None = None,
 ) -> MagicMock:
     track = MagicMock()
     track.ratingKey = rating_key
@@ -75,6 +76,11 @@ def _make_mock_track(
     track.genres = genre_tags or []
     track.moods = mood_tags or []
     track.hasSonicAnalysis = has_sonic
+    if bpm is not None:
+        track.musicAnalysis.tempo = bpm
+    else:
+        # Simulate missing musicAnalysis (AttributeError on access)
+        del track.musicAnalysis
     return track
 
 
@@ -147,6 +153,36 @@ async def test_run_sync_stores_genres(db_session: AsyncSession) -> None:
     track = result.scalar_one()
     assert "Jazz" in track.genre
     assert "Blues" in track.genre
+
+
+@pytest.mark.asyncio
+async def test_run_sync_stores_bpm(db_session: AsyncSession) -> None:
+    mock_track = _make_mock_track(20, "Tempo Track", bpm=128.0)
+    mock_section = MagicMock()
+    mock_section.title = "Music"
+    mock_section.searchTracks.return_value = [mock_track]
+
+    with patch("app.services.sync.get_music_section", return_value=mock_section):
+        await run_sync(db_session)
+
+    result = await db_session.execute(select(Track).where(Track.rating_key == 20))
+    track = result.scalar_one()
+    assert track.bpm == 128.0
+
+
+@pytest.mark.asyncio
+async def test_run_sync_stores_null_bpm_when_no_analysis(db_session: AsyncSession) -> None:
+    mock_track = _make_mock_track(21, "No BPM Track")  # bpm=None → no musicAnalysis
+    mock_section = MagicMock()
+    mock_section.title = "Music"
+    mock_section.searchTracks.return_value = [mock_track]
+
+    with patch("app.services.sync.get_music_section", return_value=mock_section):
+        await run_sync(db_session)
+
+    result = await db_session.execute(select(Track).where(Track.rating_key == 21))
+    track = result.scalar_one()
+    assert track.bpm is None
 
 
 @pytest.mark.asyncio

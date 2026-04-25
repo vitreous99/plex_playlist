@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -44,6 +45,80 @@ MODEL_NAME = "all-MiniLM-L6-v2"
 VECTOR_INDEX_PATH = Path(__file__).parent.parent.parent.parent / "db" / "vector_index.faiss"
 VECTOR_KEYS_PATH = Path(__file__).parent.parent.parent.parent / "db" / "vector_index_keys.json"
 BATCH_SIZE = 100  # Embed tracks in batches to manage memory
+
+# ---------------------------------------------------------------------------
+# Module-level singletons — loaded once, reused across requests
+# ---------------------------------------------------------------------------
+
+_model: "SentenceTransformer | None" = None  # type: ignore[type-arg]
+_index: "faiss.Index | None" = None  # type: ignore[type-arg]
+_rating_keys: list[int] = []
+_singleton_lock = threading.Lock()
+
+
+def _load_search_singletons(
+    index_path: Path | None = None,
+    keys_path: Path | None = None,
+) -> tuple["SentenceTransformer", "faiss.Index", list[int]]:  # type: ignore[type-arg]
+    """Load (or return cached) the sentence-transformer model and FAISS index.
+
+    If explicit override paths are supplied (used in tests), those are loaded
+    directly without touching or polluting the module-level singletons.
+
+    Thread-safe: uses a module-level lock so concurrent first requests don't
+    race to load the model simultaneously.
+    """
+    global _model, _index, _rating_keys
+
+    idx_path = index_path or VECTOR_INDEX_PATH
+    key_path = keys_path or VECTOR_KEYS_PATH
+
+    # When explicit paths are given (test mode), load fresh without caching
+    if index_path is not None or keys_path is not None:
+        if not idx_path.exists() or not key_path.exists():
+            raise FileNotFoundError(
+                f"Vector index not found at {idx_path}. Run a library sync first."
+            )
+        model_instance = _model
+        if model_instance is None:
+            with _singleton_lock:
+                if _model is None:
+                    logger.info("Loading SentenceTransformer model '%s' (first call)…", MODEL_NAME)
+                    _model = SentenceTransformer(MODEL_NAME)
+                model_instance = _model
+        index_instance = faiss.read_index(str(idx_path))
+        with open(key_path, "r") as f:
+            keys = json.load(f)
+        return model_instance, index_instance, keys
+
+    with _singleton_lock:
+        if _model is None:
+            logger.info("Loading SentenceTransformer model '%s' (first call)…", MODEL_NAME)
+            _model = SentenceTransformer(MODEL_NAME)
+
+        if _index is None or not _rating_keys:
+            if not idx_path.exists() or not key_path.exists():
+                raise FileNotFoundError(
+                    f"Vector index not found at {idx_path}. Run a library sync first."
+                )
+            logger.info("Loading FAISS index from %s (first call)…", idx_path)
+            _index = faiss.read_index(str(idx_path))
+            with open(key_path, "r") as f:
+                _rating_keys = json.load(f)
+
+    return _model, _index, _rating_keys
+
+
+def invalidate_search_singletons() -> None:
+    """Discard cached index/keys so the next search call reloads from disk.
+
+    Call this after ``build_vector_index`` completes to pick up the new index.
+    """
+    global _index, _rating_keys
+    with _singleton_lock:
+        _index = None
+        _rating_keys = []
+    logger.info("Vector search singletons invalidated — will reload on next search.")
 
 
 # ---------------------------------------------------------------------------
@@ -154,14 +229,14 @@ def search_vector_index(
 ) -> list[int]:
     """Search the vector index for tracks semantically similar to query.
 
-    Embeds the query using the same model, then finds the top-k nearest
-    neighbors in the FAISS index.
+    Uses module-level singletons for the SentenceTransformer model and FAISS
+    index so that neither is reloaded from disk on each call.
 
     Args:
         query:       Natural-language query (e.g., "relaxed jazz").
         top_k:       Number of results to return (default 40).
-        index_path:  Explicit path to vector_index.faiss (for testing).
-        keys_path:   Explicit path to vector_index_keys.json (for testing).
+        index_path:  Explicit path to vector_index.faiss (for testing / overrides singleton).
+        keys_path:   Explicit path to vector_index_keys.json (for testing / overrides singleton).
 
     Returns:
         List of rating_keys (Plex track IDs) ranked by similarity.
@@ -177,25 +252,21 @@ def search_vector_index(
             "Run: pip install faiss-cpu sentence-transformers"
         )
 
-    # Resolve paths
-    idx_path = Path(index_path) if index_path else VECTOR_INDEX_PATH
-    key_path = Path(keys_path) if keys_path else VECTOR_KEYS_PATH
+    # Resolve explicit override paths (used in tests)
+    idx_override = Path(index_path) if index_path else None
+    key_override = Path(keys_path) if keys_path else None
 
-    if not idx_path.exists() or not key_path.exists():
-        logger.warning(f"Vector index not found at {idx_path}. Returning empty results.")
+    try:
+        model, index, rating_keys = _load_search_singletons(idx_override, key_override)
+    except FileNotFoundError as e:
+        logger.warning(str(e) + " — returning empty results.")
         return []
-
-    # Load index and mapping
-    index = faiss.read_index(str(idx_path))
-    with open(key_path, "r") as f:
-        rating_keys = json.load(f)
 
     if index.ntotal == 0:
         logger.warning("Vector index is empty. No tracks to search.")
         return []
 
     # Embed query and search
-    model = SentenceTransformer(MODEL_NAME)
     query_embedding = model.encode(query, convert_to_numpy=True)
     query_embedding = np.array([query_embedding], dtype=np.float32)
     faiss.normalize_L2(query_embedding)

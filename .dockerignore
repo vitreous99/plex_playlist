@@ -1,0 +1,59 @@
+# Git and version control
+.git
+.gitignore
+.github
+
+# Python virtual environments
+.venv
+venv
+env
+ENV
+
+# Python cache
+__pycache__
+.pytest_cache
+.pytype
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files (keep .env.example but ignore actual .env)
+.env
+.env.local
+
+# Development tools
+.cline/
+
+# Database and state files (usually local dev artifacts)
+db/*.faiss
+db/*.json
+ts_state/
+
+# CI/CD and other tools
+.secrets.baseline
+.pre-commit-hooks.yaml
+
+# Documentation (not needed in container)
+*.md
+documentation/
+
+# Misc
+.gitattributes
+KEEP_ALIVE_SETUP.md
+wsl_to_windows.md
+
+# Test coverage and reports
+.coverage
+htmlcov/

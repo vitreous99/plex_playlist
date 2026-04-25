@@ -11,7 +11,7 @@ from plexapi.audio import Track as PlexTrack
 from app.services.ollama_client import generate_playlist
 from app.services.track_matcher import match_tracks
 from app.services.sonic_engine import expand_with_sonic_similarity, build_sonic_adventure
-from app.services.prompt_processor import extract_keywords, build_context_pool, build_system_prompt
+from app.services.prompt_processor import extract_keywords, build_context_pool, build_system_prompt, parse_intent
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +49,15 @@ async def build_playlist(
     
     # Build the system prompt from context
     keywords = extract_keywords(prompt)
-    context_pool = await build_context_pool(session, keywords, on_event=on_event)
-    system_prompt = build_system_prompt(context_pool, seed_count)
+    intent = await parse_intent(prompt)
+    context_pool = await build_context_pool(
+        session,
+        keywords,
+        vector_query=prompt,
+        genre_hint=intent.genre_hint or None,
+        on_event=on_event,
+    )
+    system_prompt = build_system_prompt(context_pool, seed_count, intent=intent)
     
     llm_response = await generate_playlist(system_prompt, prompt, seed_count, on_event=on_event)
     

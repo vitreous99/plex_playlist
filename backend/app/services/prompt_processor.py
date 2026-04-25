@@ -89,18 +89,32 @@ Return a JSON object with:
 - mood: Emotional vibe (e.g., "relaxed", "energetic", "melancholic", "happy"). Leave EMPTY if not explicitly mentioned.
 - tempo: Tempo preference (e.g., "slow", "medium", "fast"). Leave EMPTY if not explicitly mentioned.
 - genre_hint: Optional primary genre (e.g., "jazz", "rock", "hiphop", "ambient"). If user mentions ANY music genre/style, extract it here. Leave empty if no genre requested.
+- tone: Attitude/tone from language and word choice. Detect:
+  * "playful" - casual slang ("yo", "gimme", "hook me up"), lowercase, exclamation marks, fun vibes
+  * "serious" - formal language ("I need", "please", "I'd like"), proper grammar
+  * "demanding" - imperative/urgent ("PLAY", "GIVE ME", all-caps, commanding)
+  * "casual" - conversational, relaxed phrasing
+  Leave EMPTY if neutral/unclear.
+- formality: Formality level:
+  * "slang" - uses colloquial/slang terms ("yo", "gimme", "dude")
+  * "formal" - uses polite, proper language ("please", "would you", "I would like")
+  * "casual" - conversational, everyday speech
+  Leave EMPTY if neutral.
 - exclude: List of terms to exclude (e.g., ["christmas", "sad"]).
 
 CRITICAL RULES:
 1. GENRE DETECTION: If user says "hiphop", "hip-hop", "rap", "r&b", "trap", "jazz", "rock", "pop", "metal", "indie", "electronic", "ambient", "lo-fi", etc., extract it as genre_hint.
 2. Only populate mood/tempo if EXPLICITLY stated in request. Do NOT infer defaults.
-3. If user asks to avoid something (e.g., "no sad songs", "no christmas"), populate exclude.
-4. Return ONLY valid JSON conforming to the schema.
+3. TONE DETECTION: Analyze word choice, punctuation, capitalization, and phrasing to detect attitude.
+4. If user asks to avoid something (e.g., "no sad songs", "no christmas"), populate exclude.
+5. Return ONLY valid JSON conforming to the schema.
 
 Examples:
-- "gimme some true hiphop" → {{"mood": "", "tempo": "", "genre_hint": "hiphop", "exclude": []}}
-- "relaxed jazz afternoon" → {{"mood": "relaxed", "tempo": "", "genre_hint": "jazz", "exclude": []}}
-- "upbeat pop no sad stuff" → {{"mood": "upbeat", "tempo": "", "genre_hint": "pop", "exclude": ["sad"]}}
+- "yo play me some true hiphop" → {{"mood": "", "tempo": "", "genre_hint": "hiphop", "tone": "playful", "formality": "slang", "exclude": []}}
+- "I need classical music for focus" → {{"mood": "", "tempo": "", "genre_hint": "classical", "tone": "serious", "formality": "formal", "exclude": []}}
+- "relaxed jazz afternoon" → {{"mood": "relaxed", "tempo": "", "genre_hint": "jazz", "tone": "", "formality": "", "exclude": []}}
+- "GIMME METAL NOW" → {{"mood": "", "tempo": "fast", "genre_hint": "metal", "tone": "demanding", "formality": "slang", "exclude": []}}
+- "upbeat pop no sad stuff" → {{"mood": "upbeat", "tempo": "", "genre_hint": "pop", "tone": "casual", "formality": "", "exclude": ["sad"]}}
 
 User Request: "{user_prompt}"
 """
@@ -454,9 +468,16 @@ Your task is to generate a playlist based on the user's request.
 You MUST only suggest tracks that could plausibly exist in the user's library.
 Focus on titles and artists that match the context provided below.
 
-## Real-World Context
-Current Date: {current_date}
-Current Season: {current_season}
+## User's Intent & Attitude
+Mood: {mood}
+Tempo: {tempo}
+Genre hint: {genre_hint}
+Tone: {tone}
+Formality: {formality}
+Exclusions: {exclusions}
+
+## Playlist Strategy Based on User's Tone
+{tone_strategy}
 
 ## Library Context
 Artists available in library:
@@ -472,10 +493,13 @@ Sample matching tracks from your search:
 - Select exactly {track_count} tracks from the user's library.
 - Suggest track titles and artists that exist in the context above.
 - Prioritise tracks matching the mood, genre, or feel of the user's request.
+- Match the user's tone and energy in your selections.
 - Provide a concise reasoning for each track (1-2 sentences).
+- Name the playlist based on the user's request, mood, or genre — NOT the current date or season unless the user explicitly mentioned a season or time of year.
 
 ## Negative Constraints (CRITICAL)
-- DO NOT include holiday-specific music (e.g., Christmas, Halloween, Thanksgiving) UNLESS the user explicitly requests it, or it perfectly matches the Current Season provided above.
+- DO NOT include holiday-specific music (e.g., Christmas, Halloween, Thanksgiving) UNLESS the user explicitly requests it, or it perfectly matches the current season ({current_season}).
+- Respect all terms in the Exclusions list above.
 - If the prompt is broad (e.g., "rainy sunday afternoon"), default to universally appropriate tracks and avoid highly niche, depressing, or holiday-themed extremes.
 
 - Return ONLY a valid JSON object conforming to this schema:
@@ -499,8 +523,18 @@ def get_current_season() -> str:
 def build_system_prompt(
     context_pool: dict[str, list[str]],
     track_count: int,
+    intent: PlaylistIntent | None = None,
 ) -> str:
-    """Build the system prompt injected into the LLM conversation."""
+    """Build the system prompt injected into the LLM conversation.
+    
+    Args:
+        context_pool: Dict with "artists", "genres", "sample_tracks" lists.
+        track_count: Number of tracks requested.
+        intent: Optional PlaylistIntent with mood, tempo, genre_hint, tone, formality, exclude.
+    
+    Returns:
+        Complete system prompt string ready for the LLM.
+    """
     artists_block = (
         "\n".join(f"  - {a}" for a in context_pool["artists"]) or "  (none found)"
     )
@@ -514,13 +548,58 @@ def build_system_prompt(
  
     schema_str = json.dumps(PlaylistResponse.model_json_schema(), indent=2)
     
-    # Inject real-world context
-    current_date = datetime.now().strftime("%B %d, %Y")
+    # Get current season for holiday-specific music filtering
     current_season = get_current_season()
+    
+    # Extract intent fields, with defaults if None
+    mood = (intent.mood if intent else "") or "any mood"
+    tempo = (intent.tempo if intent else "") or "any tempo"
+    genre_hint = (intent.genre_hint if intent else "") or "any genre"
+    tone = (intent.tone if intent else "") or "neutral"
+    formality = (intent.formality if intent else "") or "neutral"
+    exclusions = ", ".join(intent.exclude) if intent and intent.exclude else "none"
+    
+    # Build tone-aware strategy guidance
+    tone_strategy = ""
+    if intent and intent.tone:
+        tone_lower = intent.tone.lower()
+        if "playful" in tone_lower:
+            tone_strategy = (
+                "- The user is asking in a PLAYFUL way. "
+                "Favor track variety, unexpected gems, deep cuts, and fun discovery. "
+                "Mix popular tracks with interesting hidden gems."
+            )
+        elif "demanding" in tone_lower:
+            tone_strategy = (
+                "- The user is asking DEMANDINGLY. "
+                "Prioritize iconic, definitive, and chart-topping tracks. "
+                "Focus on the most acclaimed/landmark selections in the genre."
+            )
+        elif "serious" in tone_lower:
+            tone_strategy = (
+                "- The user is asking SERIOUSLY. "
+                "Favor cohesive, high-quality, well-regarded tracks. "
+                "Suggest thoughtful, focused selections that create a unified vibe."
+            )
+        elif "casual" in tone_lower:
+            tone_strategy = (
+                "- The user is asking CASUALLY. "
+                "Favor approachable, fun, and well-known tracks. "
+                "Balance familiar hits with some interesting alternatives."
+            )
+    
+    if not tone_strategy:
+        tone_strategy = "- Match the user's implied energy and attitude in track selection."
 
     prompt = _SYSTEM_PROMPT_TEMPLATE.format(
-        current_date=current_date,
         current_season=current_season,
+        mood=mood,
+        tempo=tempo,
+        genre_hint=genre_hint,
+        tone=tone,
+        formality=formality,
+        exclusions=exclusions,
+        tone_strategy=tone_strategy,
         max_items=MAX_CONTEXT_ITEMS,
         artists=artists_block,
         genres=genres_block,
@@ -530,8 +609,10 @@ def build_system_prompt(
     )
     
     logger.info(
-        "SYSTEM_PROMPT | track_count=%d | artists_sample=%s | genres_sample=%s",
+        "SYSTEM_PROMPT | track_count=%d | mood=%s | tone=%s | artists_sample=%s | genres_sample=%s",
         track_count,
+        mood,
+        tone,
         list(context_pool["artists"])[:3] if context_pool["artists"] else [],
         list(context_pool["genres"])[:3] if context_pool["genres"] else [],
     )
@@ -553,7 +634,7 @@ async def build_prompt(
         user_prompt:  Raw user input.
         search_terms: Smart search terms generated by the LLM pass 1.
         track_count:  Number of tracks requested.
-        intent:       Optional parsed intent with genre_hint, mood, etc.
+        intent:       Optional parsed intent with genre_hint, mood, tone, etc.
 
     Returns:
         Tuple of (system_prompt, user_message) ready for the LLM.
@@ -564,7 +645,7 @@ async def build_prompt(
     context_pool = await build_context_pool(
         session, search_terms, genre_hint=genre_hint
     )
-    system_prompt = build_system_prompt(context_pool, track_count)
+    system_prompt = build_system_prompt(context_pool, track_count, intent=intent)
     user_message = (
         f"Please create a {track_count}-track playlist for: {user_prompt}"
     )

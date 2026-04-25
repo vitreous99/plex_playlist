@@ -315,15 +315,161 @@ function displaySummaryCard(event) {
     
     const container = document.getElementById('activity-feed-container');
     container.scrollTop = container.scrollHeight;
+    
+    // Attach event listeners to the new buttons
+    attachPlaySaveListeners().catch(err => console.error('Error in attachPlaySaveListeners:', err));
+}
+
+async function attachPlaySaveListeners() {
+    const playBtn = document.getElementById('btn-play-top');
+    const saveBtn = document.getElementById('btn-save-top');
+    
+    if (playBtn) {
+        playBtn.addEventListener('click', handlePlay);
+    }
+    
+    if (saveBtn) {
+        saveBtn.addEventListener('click', handleSave);
+    }
+    
+    // Refresh available Plex Amp instances before activating the play button
+    await fetchClientsAndSelectPlexAmp();
+    
+    // Show the action buttons container
+    const actionButtonsContainer = document.getElementById('action-buttons');
+    if (actionButtonsContainer) {
+        actionButtonsContainer.style.display = 'flex';
+    }
+}
+
+// --- Fetch Clients and Auto-Select Plex Amp ---
+async function fetchClientsAndSelectPlexAmp() {
+    try {
+        const res = await fetch(`${getBaseUrl()}/api/clients`);
+        if (!res.ok) throw new Error('Failed to fetch clients');
+        const clients = await res.json();
+        
+        const select = document.getElementById('client');
+        const previousValue = select.value; // Store previously selected value
+        select.innerHTML = clients.length ? '' : '<option value="">No devices found</option>';
+        
+        let plexampClient = null;
+        
+        clients.forEach(c => {
+            const opt = document.createElement('option');
+            opt.value = c.name;
+            opt.textContent = `${c.name} (${c.product})`;
+            select.appendChild(opt);
+            
+            // Look for Plex Amp instance
+            if (c.product && c.product.toLowerCase().includes('plexamp')) {
+                plexampClient = c.name;
+            }
+        });
+        
+        // Auto-select Plex Amp if found, otherwise restore previous selection or select first available
+        if (plexampClient) {
+            select.value = plexampClient;
+        } else if (previousValue && Array.from(select.options).some(opt => opt.value === previousValue)) {
+            select.value = previousValue;
+        } else if (clients.length > 0) {
+            select.value = clients[0].name;
+        }
+    } catch (err) {
+        console.error('Error fetching clients:', err);
+        const select = document.getElementById('client');
+        select.innerHTML = '<option value="">Error loading devices</option>';
+    }
+}
+
+async function handlePlay() {
+    if (!currentPlaylist) return;
+    
+    const client = document.getElementById('client').value;
+    if (!client) {
+        showToast('Please select a playback device', true);
+        return;
+    }
+
+    const btn = document.getElementById('btn-play-top');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Playing...';
+    
+    try {
+        const prompt = document.getElementById('prompt').value;
+        const res = await fetch(`${getBaseUrl()}/api/playlist/play`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                prompt, 
+                track_count: currentPlaylist.tracks.length,
+                client_name: client,
+                generation_id: currentGenerationId,
+            })
+        });
+        
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.detail || 'Failed to start playback');
+        }
+        showToast(`Playback started on ${client}`);
+    } catch (err) {
+        console.error('Play error:', err);
+        showToast(err.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
+}
+
+async function handleSave() {
+    if (!currentPlaylist) return;
+
+    const btn = document.getElementById('btn-save-top');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Saving...';
+    
+    try {
+        const prompt = document.getElementById('prompt').value;
+        const res = await fetch(`${getBaseUrl()}/api/playlist/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                prompt, 
+                track_count: currentPlaylist.tracks.length,
+                playlist_name: currentPlaylist.name,
+                generation_id: currentGenerationId,
+            })
+        });
+        
+        if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            throw new Error(data.detail || 'Failed to save playlist');
+        }
+        showToast(`Playlist '${currentPlaylist.name}' saved`);
+    } catch (err) {
+        console.error('Save error:', err);
+        showToast(err.message, true);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+    }
 }
 
 // --- Generate Playlist (Streaming) ---
 document.getElementById('btn-generate').addEventListener('click', async () => {
     const prompt = document.getElementById('prompt').value.trim();
     const trackCount = parseInt(document.getElementById('track-count').value, 10);
-    
+
     if (!prompt) {
         showToast('Please enter a prompt', true);
+        return;
+    }
+
+    if (isNaN(trackCount) || trackCount < 1) {
+        showToast('Please enter a valid track count', true);
         return;
     }
 
@@ -333,6 +479,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     
     document.getElementById('activity-feed-container').classList.remove('hidden');
     document.getElementById('results-container').classList.add('hidden');
+    document.getElementById('action-buttons').style.display = 'none';
     document.getElementById('activity-feed').innerHTML = '';
     document.getElementById('progress-bar').style.width = '0%';
     
@@ -347,6 +494,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt, track_count: trackCount }),
+            keepalive: true,  // Prevent browser from terminating connection when tab loses focus
         });
         
         if (!res.ok) {
@@ -387,6 +535,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
                             };
                             saveState();
                             displaySummaryCard(eventData);
+                            displayResults(currentPlaylist, false);
                             addFeedLine(eventData);
                         } else if (eventData.phase === 'error') {
                             addFeedLine(eventData);
@@ -410,7 +559,7 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     }
 });
 
-function displayResults(data) {
+function displayResults(data, hideFeed = true) {
     document.getElementById('playlist-title').textContent = data.name;
     document.getElementById('playlist-desc').textContent = data.description;
     
@@ -431,83 +580,10 @@ function displayResults(data) {
         });
     }
     
-    document.getElementById('activity-feed-container').classList.add('hidden');
+    if (hideFeed) {
+        document.getElementById('activity-feed-container').classList.add('hidden');
+    }
     document.getElementById('results-container').classList.remove('hidden');
 }
 
-// --- Play / Save Actions ---
-document.getElementById('btn-play').addEventListener('click', async () => {
-    if (!currentPlaylist) return;
-    
-    const client = document.getElementById('client').value;
-    if (!client) {
-        showToast('Please select a playback device', true);
-        return;
-    }
-
-    const btn = document.getElementById('btn-play');
-    btn.disabled = true;
-    const originalText = btn.textContent;
-    btn.textContent = 'Playing...';
-    
-    try {
-        const prompt = document.getElementById('prompt').value;
-        const res = await fetch(`${getBaseUrl()}/api/playlist/play`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                prompt, 
-                track_count: currentPlaylist.tracks.length,
-                client_name: client,
-                generation_id: currentGenerationId,
-            })
-        });
-        
-        if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.detail || 'Failed to start playback');
-        }
-        showToast(`Playback started on ${client}`);
-    } catch (err) {
-        console.error('Play error:', err);
-        showToast(err.message, true);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
-});
-
-document.getElementById('btn-save').addEventListener('click', async () => {
-    if (!currentPlaylist) return;
-
-    const btn = document.getElementById('btn-save');
-    btn.disabled = true;
-    const originalText = btn.textContent;
-    btn.textContent = 'Saving...';
-    
-    try {
-        const prompt = document.getElementById('prompt').value;
-        const res = await fetch(`${getBaseUrl()}/api/playlist/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-                prompt, 
-                track_count: currentPlaylist.tracks.length,
-                playlist_name: currentPlaylist.name,
-                generation_id: currentGenerationId,
-            })
-        });
-        
-        if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            throw new Error(data.detail || 'Failed to save playlist');
-        }
-        showToast(`Playlist '${currentPlaylist.name}' saved`);
-    } catch (err) {
-        console.error('Save error:', err);
-        showToast(err.message, true);
-    } finally {
-        btn.disabled = false;
-        btn.textContent = originalText;
-    }
-});
+// --- Play / Save Actions (moved to displaySummaryCard where buttons are created) ---

@@ -483,9 +483,11 @@ async def event_stream_generator(
     
     Yields formatted SSE lines (data: {json}\n\n).
     Catches events from the pipeline via a queue and formats them.
+    Also sends periodic heartbeat comments to prevent browser throttling.
     """
     generation_id = str(uuid.uuid4())
     event_queue: asyncio.Queue[Optional[StreamEvent]] = asyncio.Queue()
+    stream_start_time = datetime.now(timezone.utc)  # Track when stream started
 
     def on_event(event: StreamEvent) -> None:
         """Callback from pipeline to queue an event."""
@@ -550,26 +552,43 @@ async def event_stream_generator(
     # Start the pipeline task
     pipeline_task = asyncio.create_task(run_pipeline())
 
-    # Read from queue and yield events
+    # Read from queue and yield events with heartbeat to prevent browser throttling
+    last_heartbeat = datetime.now(timezone.utc)
+    heartbeat_interval = 15  # Send heartbeat every 15 seconds to keep connection alive
+    
     while True:
         try:
-            event = await asyncio.wait_for(event_queue.get(), timeout=60.0)
+            # Use wait_for with a short timeout and check for heartbeat needs
+            event = await asyncio.wait_for(event_queue.get(), timeout=5.0)
+            last_heartbeat = datetime.now(timezone.utc)
+            
+            if event is None:
+                # Pipeline finished
+                break
+            
+            yield sse_format(event)
         except asyncio.TimeoutError:
-            logger.warning(f"Event stream timeout for {generation_id}")
-            timeout_event = StreamEvent(
-                phase="error",
-                step="timeout",
-                message="Pipeline timed out",
-                detail={"generation_id": generation_id},
-            )
-            yield sse_format(timeout_event)
-            break
-
-        if event is None:
-            # Pipeline finished
-            break
-
-        yield sse_format(event)
+            # Check if we need to send a heartbeat to prevent browser throttling
+            now = datetime.now(timezone.utc)
+            elapsed_since_heartbeat = (now - last_heartbeat).total_seconds()
+            elapsed_total = (now - stream_start_time).total_seconds()
+            
+            # Send heartbeat if due (keep connection alive for background tabs)
+            if elapsed_since_heartbeat >= heartbeat_interval:
+                yield ": heartbeat\n\n"
+                last_heartbeat = now
+            
+            # Safety check: if pipeline takes too long (>5 minutes), abort
+            if elapsed_total > 300:
+                logger.warning(f"Event stream exceeded 5 minute timeout for {generation_id}")
+                timeout_event = StreamEvent(
+                    phase="error",
+                    step="timeout",
+                    message="Pipeline took too long",
+                    detail={"generation_id": generation_id},
+                )
+                yield sse_format(timeout_event)
+                break
 
     # Ensure pipeline task is cleaned up
     if not pipeline_task.done():

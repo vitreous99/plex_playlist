@@ -6,7 +6,7 @@ Defines the persistent data model for the library metadata cache.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, Float, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.database import Base
@@ -29,6 +29,7 @@ class Track(Base):
     album: Mapped[str | None] = mapped_column(String, nullable=True)
     genre: Mapped[str | None] = mapped_column(String, nullable=True)
     style: Mapped[str | None] = mapped_column(String, nullable=True)
+    bpm: Mapped[float | None] = mapped_column(Float, nullable=True)
     has_sonic_analysis: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

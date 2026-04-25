@@ -247,6 +247,48 @@ async def disconnect(ip: Optional[str] = None) -> WakeResponse:
     )
 
 
+@app.post("/ping")
+async def ping(ip: Optional[str] = None) -> WakeResponse:
+    """
+    Send a keep-alive ping to Shield via ADB.
+    
+    Sends a HOME key event to keep the device awake without interrupting playback.
+    Useful for preventing the device from sleeping during long music sessions.
+
+    Args:
+        ip: Shield IP:port (default from SHIELD_IP env var).
+
+    Returns:
+        WakeResponse with ping status.
+    """
+    target_ip = ip or f"{SHIELD_IP}:5555"
+    adb_device_spec = target_ip
+    
+    logger.info(f"Sending keep-alive ping to {adb_device_spec}")
+    
+    # Ensure connection
+    connect_success, _ = await run_adb_command(["connect", adb_device_spec], timeout=10.0)
+    if not connect_success:
+        logger.warning(f"Could not connect to {adb_device_spec} for ping")
+        # Continue anyway; device might still be reachable
+    
+    # Send HOME key event to keep device awake (non-intrusive)
+    ping_success, ping_output = await run_adb_command(
+        ["-s", adb_device_spec, "shell", "input", "keyevent", "KEYCODE_HOME"],
+        timeout=ADB_TIMEOUT,
+    )
+    
+    status = "pong" if ping_success else "error"
+    message = "Keep-alive ping sent successfully" if ping_success else f"Ping failed: {ping_output}"
+    
+    return WakeResponse(
+        status=status,
+        message=message,
+        timestamp=datetime.now(timezone.utc),
+        adb_output=ping_output if not ping_success else None,
+    )
+
+
 @app.get("/debug/network")
 async def debug_network(ip: Optional[str] = None):
     """

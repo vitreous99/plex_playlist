@@ -28,6 +28,12 @@ class Settings(BaseSettings):
 
     # ADB Bridge configuration
     ADB_BRIDGE_URL: str = "http://127.0.0.1:9001"
+    SHIELD_IP: str = ""  # Optional Shield IP for ADB commands (e.g., 192.168.1.100)
+
+    # Keep-alive configuration (prevent device from sleeping during playback)
+    KEEP_ALIVE_ENABLED: bool = True
+    KEEP_ALIVE_DURATION_MINUTES: int = 90
+    KEEP_ALIVE_INTERVAL_MINUTES: int = 10
 
     # Database configuration
     DATABASE_URL: str = "sqlite+aiosqlite:///db/library_cache.db"
@@ -39,6 +45,7 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8",
         "case_sensitive": True,
+        "extra": "ignore",  # Ignore unknown environment variables
     }
 
 

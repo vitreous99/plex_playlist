@@ -10,6 +10,8 @@ see raw PlexAPI internals.
 from __future__ import annotations
 
 import logging
+import uuid
+from pathlib import Path
 
 from plexapi.exceptions import BadRequest, NotFound, Unauthorized
 from plexapi.library import MusicSection
@@ -22,6 +24,38 @@ logger = logging.getLogger(__name__)
 
 class PlexConnectionError(RuntimeError):
     """Raised when connecting to or querying the Plex server fails."""
+
+
+# ---------------------------------------------------------------------------
+# Persistent client identifier
+# ---------------------------------------------------------------------------
+def _get_client_identifier() -> str:
+    """Get or generate a persistent client identifier.
+    
+    The identifier is stored in db/client_id.txt and persists across restarts.
+    This ensures the application maintains the same identity for Plex devices
+    (Shield, TV, etc.), preventing repeated permission prompts.
+    
+    Returns:
+        str: A stable UUID used as clientIdentifier for PlexServer.
+    """
+    client_id_file = Path("db/client_id.txt")
+    
+    # Create db directory if it doesn't exist
+    client_id_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Return existing ID if present
+    if client_id_file.exists():
+        client_id = client_id_file.read_text(encoding="utf-8").strip()
+        if client_id:
+            logger.debug("Using existing client identifier: %s", client_id)
+            return client_id
+    
+    # Generate new ID and persist it
+    client_id = str(uuid.uuid4())
+    client_id_file.write_text(client_id, encoding="utf-8")
+    logger.info("Generated new persistent client identifier: %s", client_id)
+    return client_id
 
 
 # ---------------------------------------------------------------------------
@@ -58,7 +92,11 @@ def get_server() -> PlexServer:
 
     logger.info("Connecting to Plex server at %s …", url)
     try:
-        _plex_server = PlexServer(url, token, timeout=30)
+        _plex_server = PlexServer(
+            url,
+            token,
+            timeout=30,
+        )
         logger.info(
             "Connected to Plex server '%s' (version %s).",
             _plex_server.friendlyName,
@@ -105,7 +143,12 @@ def get_lan_server() -> PlexServer:
 
     logger.info("Connecting to Plex server via LAN at %s …", lan_url)
     try:
-        _plex_lan_server = PlexServer(lan_url, token, timeout=30)
+        _plex_lan_server = PlexServer(
+            lan_url,
+            token,
+            timeout=30,
+            clientIdentifier=_get_client_identifier(),
+        )
         logger.info("LAN Plex connection established at %s.", lan_url)
         return _plex_lan_server
     except Exception as exc:

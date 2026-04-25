@@ -5,6 +5,7 @@ Provides async SQLAlchemy infrastructure for the SQLite-backed
 library cache.
 """
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -39,6 +40,12 @@ async def init_db() -> None:
     """
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Additive migration: add bpm column to existing databases that
+        # were created before this column was introduced.
+        try:
+            await conn.exec_driver_sql("ALTER TABLE tracks ADD COLUMN bpm REAL")
+        except OperationalError:
+            pass  # Column already exists — nothing to do
 
 
 async def get_session() -> AsyncSession:  # type: ignore[misc]

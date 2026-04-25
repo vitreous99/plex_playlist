@@ -10,6 +10,7 @@ never raw Row objects, so callers get typed, predictable results.
 from __future__ import annotations
 
 import logging
+import random
 from typing import Sequence
 
 from sqlalchemy import func, or_, select
@@ -43,15 +44,19 @@ async def search_tracks_by_keywords(
         logger.debug("search_tracks_by_keywords called with empty keywords list.")
         return []
 
+    def _escape_like(kw: str) -> str:
+        """Escape LIKE metacharacters so user text is treated as a literal string."""
+        return kw.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
     conditions = []
     for kw in keywords:
-        pattern = f"%{kw}%"
+        pattern = f"%{_escape_like(kw)}%"
         conditions.append(
             or_(
-                Track.title.ilike(pattern),
-                Track.artist.ilike(pattern),
-                Track.genre.ilike(pattern),
-                Track.style.ilike(pattern),
+                Track.title.ilike(pattern, escape="\\"),
+                Track.artist.ilike(pattern, escape="\\"),
+                Track.genre.ilike(pattern, escape="\\"),
+                Track.style.ilike(pattern, escape="\\"),
             )
         )
 
@@ -65,18 +70,21 @@ async def search_tracks_by_keywords(
 
 
 async def get_distinct_artists(session: AsyncSession) -> list[str]:
-    """Return a sorted list of all unique artist names in the cache.
+    """Return a list of all unique artist names in the cache (shuffled for diversity).
+
+    Results are randomized to avoid alphabetical bias in playlist generation.
 
     Args:
         session: Async DB session.
 
     Returns:
-        Sorted list of artist name strings.
+        List of artist name strings in random order.
     """
-    stmt = select(Track.artist).distinct().order_by(func.lower(Track.artist))
+    stmt = select(Track.artist).distinct()
     result = await session.execute(stmt)
     artists = [row for (row,) in result.all() if row]
-    logger.debug("get_distinct_artists() → %d artists.", len(artists))
+    random.shuffle(artists)
+    logger.debug("get_distinct_artists() → %d artists (shuffled).", len(artists))
     return artists
 
 
@@ -110,9 +118,10 @@ async def get_artists_by_genres(
     session: AsyncSession,
     genres: list[str],
 ) -> list[str]:
-    """Return distinct artists whose tracks match any of the given genres.
+    """Return distinct artists whose tracks match any of the given genres (shuffled for diversity).
 
     Filters artists to only those with tracks tagged in the provided genres.
+    Results are randomized to avoid alphabetical bias in playlist generation.
     Useful for genre-specific playlist context building.
 
     Args:
@@ -120,7 +129,7 @@ async def get_artists_by_genres(
         genres:  List of genre names to filter by.
 
     Returns:
-        Sorted list of unique artist names for tracks in those genres.
+        List of unique artist names for tracks in those genres (in random order).
     """
     if not genres:
         logger.debug("get_artists_by_genres called with empty genres list.")
@@ -132,10 +141,11 @@ async def get_artists_by_genres(
         pattern = f"%{genre}%"
         conditions.append(Track.genre.ilike(pattern))
 
-    stmt = select(Track.artist).distinct().where(or_(*conditions)).order_by(func.lower(Track.artist))
+    stmt = select(Track.artist).distinct().where(or_(*conditions))
     result = await session.execute(stmt)
     artists = [row for (row,) in result.all() if row]
-    logger.debug("get_artists_by_genres(%s) → %d artists.", genres, len(artists))
+    random.shuffle(artists)
+    logger.debug("get_artists_by_genres(%s) → %d artists (shuffled).", genres, len(artists))
     return artists
 
 

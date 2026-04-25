@@ -118,14 +118,24 @@ class PlaylistIntent(BaseModel):
         mood:        Desired emotional vibe (e.g., "relaxed", "energetic").
         tempo:       Tempo preference (e.g., "slow", "medium", "fast").
         genre_hint:  Primary genre preference (optional, e.g., "jazz").
+        tone:        Attitude/tone of request (e.g., "playful", "serious", "demanding", "casual").
+        formality:   Formality level (e.g., "casual", "formal", "slang").
         exclude:     List of terms to exclude from results (e.g., ["christmas"]).
     """
 
-    mood: str = Field(..., description="Desired emotional vibe.")
-    tempo: str = Field(..., description="Tempo preference (slow/medium/fast).")
+    mood: str = Field(default="", description="Desired emotional vibe.")
+    tempo: str = Field(default="", description="Tempo preference (slow/medium/fast).")
     genre_hint: str = Field(
         default="",
         description="Primary genre preference (optional).",
+    )
+    tone: str = Field(
+        default="",
+        description="Attitude/tone of request (playful/serious/demanding/casual).",
+    )
+    formality: str = Field(
+        default="",
+        description="Formality level (casual/formal/slang).",
     )
     exclude: List[str] = Field(
         default_factory=list,
