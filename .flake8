@@ -1,0 +1,5 @@
+[flake8]
+max-line-length = 120
+extend-ignore = E203, W503, E501
+exclude = .git,__pycache__,.venv,venv,build,dist,.eggs
+format = %(row)d,%(col)d,%(code).1s,%(code)s:%(text)s

@@ -1,0 +1,8 @@
+[Unit]
+Description=plex_playlist backup service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/plex_playlist
+ExecStart=/bin/bash %h/plex_playlist/scripts/backup.sh
+Environment=HOME=%h

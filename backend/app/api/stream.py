@@ -132,12 +132,12 @@ async def build_playlist_streamed(
     prompt: str,
     track_count: int,
     on_event: Callable[[StreamEvent], None],
-) -> tuple[PlaylistResponse, list[Any]]:
+) -> tuple[PlaylistResponse, list[Any], list[Any]]:
     """
     Build a playlist with event callbacks at each step.
     
     Returns:
-        Tuple of (PlaylistResponse, list[PlexTrack] matched tracks)
+        Tuple of (PlaylistResponse, list[PlexTrack] final_tracks, list[DbTrack] matched_tracks)
     """
     # Import here to avoid circular imports
     from app.services.prompt_processor import (
@@ -300,6 +300,9 @@ async def build_playlist_streamed(
                 "artist_count": len(context_pool["artists"]),
                 "genre_count": len(context_pool["genres"]),
                 "sample_count": len(context_pool["sample_tracks"]),
+                "artists": context_pool["artists"],
+                "genres": context_pool["genres"],
+                "sample_tracks": context_pool["sample_tracks"],
             },
             timing_ms=step_ms,
             progress=0.18,
@@ -313,6 +316,9 @@ async def build_playlist_streamed(
             phase="prompt",
             step="prompt_ready",
             message="System prompt prepared",
+            detail={
+                "system_prompt": system_prompt,
+            },
             progress=0.2,
         )
     )
@@ -465,7 +471,7 @@ async def build_playlist_streamed(
         )
     )
 
-    return playlist_response, final_tracks
+    return playlist_response, final_tracks, matched
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +502,7 @@ async def event_stream_generator(
     async def run_pipeline() -> None:
         """Run the pipeline in a background task."""
         try:
-            playlist_response, final_tracks = await build_playlist_streamed(
+            playlist_response, final_tracks, matched = await build_playlist_streamed(
                 session, prompt, track_count, on_event
             )
             # Cache the result
@@ -508,6 +514,13 @@ async def event_stream_generator(
                 key = s.title.strip().lower()
                 if s.reasoning:
                     reasoning_map[key] = s.reasoning
+
+            # Build set of matched track rating keys for source tagging
+            matched_rating_keys = set()
+            for track in matched:
+                rk = getattr(track, "rating_key", None)
+                if rk:
+                    matched_rating_keys.add(str(rk))
 
             # Yield final complete event with all data
             final_event = StreamEvent(
@@ -528,6 +541,7 @@ async def event_stream_generator(
                             "reasoning": reasoning_map.get(
                                 (t.title if hasattr(t, "title") else "").strip().lower(), ""
                             ),
+                            "source": "llm" if str(getattr(t, "ratingKey", "")) in matched_rating_keys else "sonic",
                         }
                         for t in final_tracks  # All tracks
                     ],

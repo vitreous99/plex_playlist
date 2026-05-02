@@ -1,0 +1,5 @@
+# Sample cron line to run the repository backup daily at 02:30 UTC
+# Copy this line into your crontab (use `crontab -e`) or run the installer script:
+# CRON_SCHEDULE="30 2 * * *" bash scripts/install_backup_cron.sh
+
+30 2 * * * /home/youruser/plex_playlist/scripts/backup.sh >> /home/youruser/plex_playlist/scripts/backup.log 2>&1

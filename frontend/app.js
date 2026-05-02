@@ -80,6 +80,30 @@ document.addEventListener('DOMContentLoaded', () => {
             restoreState();
         }
     });
+
+    // Setup control panel toggle button
+    const cpToggle = document.getElementById('cp-toggle');
+    if (cpToggle) {
+        cpToggle.addEventListener('click', () => {
+            const cpBody = document.getElementById('cp-body');
+            const isHidden = cpBody.style.display === 'none';
+            
+            if (isHidden) {
+                // Show control panel
+                cpBody.style.display = 'block';
+                cpToggle.textContent = 'Hide Details';
+                // Re-open all phase sections
+                document.getElementById('phase-prompt').setAttribute('open', '');
+                document.getElementById('phase-llm').setAttribute('open', '');
+                document.getElementById('phase-matching').setAttribute('open', '');
+                document.getElementById('phase-sonic').setAttribute('open', '');
+            } else {
+                // Hide control panel
+                cpBody.style.display = 'none';
+                cpToggle.textContent = 'Show Details';
+            }
+        });
+    }
 });
 
 // --- Fetch Clients ---
@@ -190,8 +214,21 @@ document.getElementById('btn-wake').addEventListener('click', async () => {
 });
 
 // --- Activity Feed Functions ---
+
+// Map phases to their container divs
+function getPhaseContainer(phase) {
+    switch(phase) {
+        case 'prompt': return document.querySelector('#phase-prompt .phase-feed');
+        case 'llm': return document.querySelector('#phase-llm .phase-feed');
+        case 'matching': return document.querySelector('#phase-matching .phase-feed');
+        case 'sonic': 
+        case 'complete': return document.querySelector('#phase-sonic .phase-feed');
+        case 'error': return document.querySelector('#phase-sonic .phase-feed'); // Default to sonic for errors
+        default: return null;
+    }
+}
+
 function addFeedLine(event) {
-    const feed = document.getElementById('activity-feed');
     // Record step timing and completion timestamp for summary
     try {
         stepTimings[event.step] = {
@@ -201,6 +238,11 @@ function addFeedLine(event) {
     } catch (e) {
         // ignore malformed events
     }
+
+    // Get the correct phase feed container
+    const feed = getPhaseContainer(event.phase);
+    if (!feed) return;
+
     let icon = '•', iconClass = 'feed-icon step';
     
     if (event.step.includes('_start') || event.step.includes('_complete') || event.step.includes('_warning')) {
@@ -225,6 +267,7 @@ function addFeedLine(event) {
         <div class="feed-content">
             <div class="feed-message">${escapeHtml(event.message)}</div>`;
     
+    // Special renderer for LLM-suggested tracks (revealed)
     if (event.step.includes('revealed') && event.detail) {
         const d = event.detail;
         html += `<div class="track-card">
@@ -234,6 +277,7 @@ function addFeedLine(event) {
         </div>`;
     }
     
+    // Special renderer for matched/unmatched tracks
     if ((event.step.includes('matched') || event.step.includes('unmatched')) && event.detail) {
         const d = event.detail;
         const matched = !event.step.includes('unmatched');
@@ -248,6 +292,46 @@ function addFeedLine(event) {
                 }
             </div>
         </div>`;
+    }
+
+    // Special renderer for context_pool event - show actual artists, genres, and sample tracks
+    if (event.step === 'context_pool' && event.detail) {
+        const d = event.detail;
+        
+        // Artists pills
+        if (d.artists && d.artists.length > 0) {
+            html += `<div class="context-pills">
+                ${d.artists.map(a => `<div class="context-pill">${escapeHtml(a)}</div>`).join('')}
+            </div>`;
+        }
+
+        // Genres pills
+        if (d.genres && d.genres.length > 0) {
+            html += `<div class="context-pills">
+                ${d.genres.map(g => `<div class="context-pill genre">${escapeHtml(g)}</div>`).join('')}
+            </div>`;
+        }
+
+        // Sample tracks list
+        if (d.sample_tracks && d.sample_tracks.length > 0) {
+            html += `<div class="sample-tracks-list">
+                ${d.sample_tracks.map(t => `
+                    <div class="sample-track-item">
+                        <div class="sample-track-title">${escapeHtml(t.title)}</div>
+                        <div class="sample-track-artist">${escapeHtml(t.artist)}${t.album ? ` • ${escapeHtml(t.album)}` : ''}</div>
+                    </div>
+                `).join('')}
+            </div>`;
+        }
+    }
+
+    // Special renderer for prompt_ready event - show full system prompt in nested details
+    if (event.step === 'prompt_ready' && event.detail && event.detail.system_prompt) {
+        const prompt = event.detail.system_prompt;
+        html += `<details class="system-prompt-details">
+            <summary>📋 Full System Prompt (click to expand)</summary>
+            <pre class="system-prompt-code">${escapeHtml(prompt)}</pre>
+        </details>`;
     }
     
     html += `</div>
@@ -268,7 +352,7 @@ function updateProgressBar(progress) {
 }
 
 function displaySummaryCard(event) {
-    const feed = document.getElementById('activity-feed');
+    const timingDiv = document.getElementById('phase-timing');
     const detail = event.detail || {};
     const totalTime = detail.total_time_ms || 0;
     const totalSeconds = (totalTime / 1000).toFixed(2);
@@ -311,7 +395,7 @@ function displaySummaryCard(event) {
     
     const card = document.createElement('div');
     card.innerHTML = html;
-    feed.appendChild(card.firstChild);
+    timingDiv.appendChild(card.firstChild);
     
     const container = document.getElementById('activity-feed-container');
     container.scrollTop = container.scrollHeight;
@@ -480,7 +564,19 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
     document.getElementById('activity-feed-container').classList.remove('hidden');
     document.getElementById('results-container').classList.add('hidden');
     document.getElementById('action-buttons').style.display = 'none';
-    document.getElementById('activity-feed').innerHTML = '';
+    
+    // Clear all phase feeds
+    document.querySelectorAll('.phase-feed').forEach(feed => feed.innerHTML = '');
+    document.getElementById('phase-timing').innerHTML = '';
+    
+    // Reset control panel to visible and open
+    document.getElementById('cp-body').style.display = 'block';
+    document.getElementById('cp-toggle').textContent = 'Hide Details';
+    document.getElementById('phase-prompt').setAttribute('open', '');
+    document.getElementById('phase-llm').setAttribute('open', '');
+    document.getElementById('phase-matching').setAttribute('open', '');
+    document.getElementById('phase-sonic').setAttribute('open', '');
+    
     document.getElementById('progress-bar').style.width = '0%';
     
     const btn = document.getElementById('btn-generate');
@@ -531,12 +627,25 @@ document.getElementById('btn-generate').addEventListener('click', async () => {
                                     title: t.title,
                                     artist: t.artist,
                                     reasoning: t.reasoning || '',
+                                    source: t.source || 'sonic',
                                 })),
                             };
                             saveState();
                             displaySummaryCard(eventData);
                             displayResults(currentPlaylist, false);
                             addFeedLine(eventData);
+                            
+                            // Collapse control panel after completion
+                            const cpBody = document.getElementById('cp-body');
+                            const cpToggle = document.getElementById('cp-toggle');
+                            cpBody.style.display = 'none';
+                            cpToggle.textContent = 'Show Details';
+                            
+                            // Close all phase sections
+                            document.getElementById('phase-prompt').removeAttribute('open');
+                            document.getElementById('phase-llm').removeAttribute('open');
+                            document.getElementById('phase-matching').removeAttribute('open');
+                            document.getElementById('phase-sonic').removeAttribute('open');
                         } else if (eventData.phase === 'error') {
                             addFeedLine(eventData);
                             showToast(`Error: ${eventData.message}`, true);
@@ -571,10 +680,20 @@ function displayResults(data, hideFeed = true) {
             const li = document.createElement('li');
             li.className = 'track-item';
             li.style.animation = `slideIn 0.3s ease-out ${idx * 0.05}s backwards`;
+            
+            let descriptionHtml = '';
+            if (track.source === 'llm' && track.reasoning) {
+                // LLM-suggested track with reasoning
+                descriptionHtml = `<div class="track-reasoning">${escapeHtml(track.reasoning)}</div>`;
+            } else if (track.source === 'sonic') {
+                // Sonic-expanded track
+                descriptionHtml = `<div class="track-source-sonic">Added via sonic analysis</div>`;
+            }
+            
             li.innerHTML = `
                 <div class="track-title">${escapeHtml(track.title)}</div>
                 <div class="track-artist">${escapeHtml(track.artist)}</div>
-                ${track.reasoning ? `<div class="track-reasoning">${escapeHtml(track.reasoning)}</div>` : ''}
+                ${descriptionHtml}
             `;
             list.appendChild(li);
         });

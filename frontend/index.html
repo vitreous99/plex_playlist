@@ -560,6 +560,156 @@
             .status-panel { width: 100%; justify-content: space-between; }
             #activity-feed-container { padding: 12px; font-size: 12px; }
         }
+
+        /* Phase Section Styling (Details/Summary) */
+        .phase-section {
+            margin-bottom: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: rgba(50, 54, 82, 0.2);
+            overflow: hidden;
+        }
+
+        .phase-section > summary {
+            cursor: pointer;
+            padding: 12px 16px;
+            background: rgba(50, 54, 82, 0.5);
+            user-select: none;
+            font-weight: 600;
+            color: #ccc;
+            transition: background 0.2s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .phase-section > summary:hover {
+            background: rgba(50, 54, 82, 0.8);
+        }
+
+        .phase-section[open] > summary {
+            background: rgba(70, 74, 102, 0.7);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .phase-section > summary::marker {
+            color: var(--primary);
+        }
+
+        .phase-feed {
+            padding: 12px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 13px;
+            color: #a8b9d0;
+        }
+
+        .phase-feed .feed-line {
+            padding: 4px 0;
+        }
+
+        /* System Prompt Nested Details */
+        .system-prompt-details {
+            margin: 8px 0 0 28px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            background: rgba(15, 17, 26, 0.6);
+        }
+
+        .system-prompt-details > summary {
+            cursor: pointer;
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #8892b0;
+            user-select: none;
+            transition: background 0.2s ease;
+        }
+
+        .system-prompt-details > summary:hover {
+            background: rgba(50, 54, 82, 0.5);
+        }
+
+        .system-prompt-details > summary::marker {
+            color: #6b7b93;
+        }
+
+        .system-prompt-code {
+            padding: 12px;
+            background: rgba(15, 17, 26, 0.8);
+            overflow-x: auto;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 11px;
+            line-height: 1.4;
+            color: #a8b9d0;
+            border-top: 1px solid var(--border);
+        }
+
+        /* Context Pills */
+        .context-pills {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 8px 0 0 28px;
+        }
+
+        .context-pill {
+            display: inline-block;
+            background: rgba(229, 160, 13, 0.15);
+            border: 1px solid rgba(229, 160, 13, 0.3);
+            color: #ffb822;
+            padding: 4px 10px;
+            border-radius: 16px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .context-pill.genre {
+            background: rgba(76, 175, 80, 0.15);
+            border-color: rgba(76, 175, 80, 0.3);
+            color: #66bb6a;
+        }
+
+        /* Sample Tracks Mini-List */
+        .sample-tracks-list {
+            margin: 8px 0 0 28px;
+            padding: 8px 12px;
+            background: rgba(15, 17, 26, 0.6);
+            border-left: 2px solid var(--primary);
+            border-radius: 4px;
+            font-size: 12px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        .sample-track-item {
+            padding: 4px 0;
+            color: #a8b9d0;
+            line-height: 1.4;
+        }
+
+        .sample-track-title {
+            color: var(--text-color);
+            font-weight: 500;
+        }
+
+        .sample-track-artist {
+            color: #8892b0;
+            font-size: 11px;
+        }
+
+        /* Source Badge */
+        .track-source-sonic {
+            font-size: 0.85em;
+            color: #8892b0;
+            margin-top: 8px;
+            font-style: italic;
+            padding-left: 12px;
+            border-left: 2px solid var(--border);
+        }
     </style>
 </head>
 <body>
@@ -616,11 +766,32 @@
     </div>
 
     <div id="activity-feed-container" class="container hidden">
-        <h2 style="margin-top: 0; margin-bottom: 16px;">Generation Progress</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h2 style="margin: 0;">🔍 Generation Details</h2>
+            <button id="cp-toggle" class="secondary" style="padding: 6px 12px; font-size: 14px;">Hide Details</button>
+        </div>
         <div class="progress-bar-container">
             <div class="progress-bar" id="progress-bar"></div>
         </div>
-        <div id="activity-feed"></div>
+        <div id="cp-body">
+            <details id="phase-prompt" class="phase-section" open>
+                <summary class="phase-summary">🎯 Prompt Processing</summary>
+                <div class="phase-feed"></div>
+            </details>
+            <details id="phase-llm" class="phase-section" open>
+                <summary class="phase-summary">🤖 LLM Generation</summary>
+                <div class="phase-feed"></div>
+            </details>
+            <details id="phase-matching" class="phase-section" open>
+                <summary class="phase-summary">🔍 Plex Matching</summary>
+                <div class="phase-feed"></div>
+            </details>
+            <details id="phase-sonic" class="phase-section" open>
+                <summary class="phase-summary">🎵 Sonic Expansion</summary>
+                <div class="phase-feed"></div>
+            </details>
+            <div id="phase-timing" style="margin-top: 16px;"></div>
+        </div>
     </div>
 
     <div id="results-container" class="container hidden">
